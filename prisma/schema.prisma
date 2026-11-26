@@ -1,0 +1,433 @@
+// PINTARA - SIM LBB Jelajah Ilmu
+// Domain model mengikuti kontrak frontend (role: wali | tutor | pengelola).
+// Status disimpan sebagai string lowercase Indonesia agar kontrak API sama
+// persis dengan tipe frontend; validasi nilai dilakukan di layer aplikasi.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  email        String?  @unique
+  passwordHash String
+  role         String // wali | tutor | pengelola
+  whatsapp     String?
+  isActive     Boolean  @default(true)
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  students          Student[]          @relation("ParentStudents")
+  registrations     Registration[]
+  tutorProfile      TutorProfile?
+  notifications     Notification[]
+  uploadedFiles     File[]
+  finalizedRecords  AttendanceRecord[] @relation("FinalizedAttendance")
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model Student {
+  id        String    @id @default(cuid())
+  parentId  String
+  name      String
+  salutation String?
+  grade     String // "8"
+  level     String // SD | SMP | SMA
+  school    String?
+  address   String?
+  gender    String?
+  birthDate DateTime?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  parent        User                  @relation("ParentStudents", fields: [parentId], references: [id], onDelete: Cascade)
+  registrations Registration[]
+  pairs         Pair[]
+  bills         Bill[]
+  changeRequests ScheduleChangeRequest[]
+
+  @@index([parentId])
+  @@index([name])
+}
+
+model TutorProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  shortName         String
+  initials          String
+  education         String?
+  bio               String?
+  subjects          String[] @default([])
+  levels            String[] @default([])
+  days              String[] @default([])
+  availableFrom     String   @default("15.00")
+  availableUntil    String   @default("21.00")
+  rating            Float    @default(4.5)
+  ratePerSession    Int?
+  honorMethod       String   @default("transfer") // tunai | transfer
+  honorMethodNote   String?
+  address           String?
+  lat               Float?
+  lng               Float?
+  defaultDistanceKm Float    @default(3)
+  distanceOverrides Json?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  registrations Registration[]          @relation("RegistrationMatch")
+  offers        TutorOffer[]
+  pairs         Pair[]
+  honorLines    HonorLine[]
+  changeRequests ScheduleChangeRequest[]
+
+  @@index([isActive])
+}
+
+model Registration {
+  id                 String    @id @default(cuid())
+  number             String    @unique
+  parentId           String
+  studentId          String?
+  studentName        String
+  grade              String
+  level              String
+  school             String?
+  address            String?
+  parentName         String
+  parentSalutation   String?
+  parentWhatsapp     String?
+  parentEmail        String?
+  subjects           String[]  @default([])
+  perWeek            Int       @default(1)
+  days               String[]  @default([])
+  startTime          String
+  notes              String?
+  status             String    @default("menunggu_verifikasi") // menunggu_verifikasi | terverifikasi | ditolak
+  submittedAt        DateTime  @default(now())
+  verifiedAt         DateTime?
+  rejectionReason    String?
+  rejectionMessage   String?
+  rejectedAt         DateTime?
+  matchedTutorId     String?
+  matchedAt          DateTime?
+  declinedTutorIds   String[]  @default([])
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  parent       User          @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student      Student?      @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  matchedTutor TutorProfile? @relation("RegistrationMatch", fields: [matchedTutorId], references: [id], onDelete: SetNull)
+  offers       TutorOffer[]
+  pair         Pair?
+
+  @@index([status, submittedAt])
+  @@index([parentId])
+  @@index([matchedTutorId])
+}
+
+model TutorOffer {
+  id             String    @id @default(cuid())
+  registrationId String
+  tutorId        String
+  studentName    String
+  grade          String
+  level          String
+  subjects       String[]  @default([])
+  schedule       String
+  location       String
+  distanceKm     Float
+  rate           Int
+  message        String?
+  sentAt         DateTime  @default(now())
+  status         String    @default("menunggu_konfirmasi") // menunggu_konfirmasi | diterima | ditolak
+  answeredAt     DateTime?
+  declineReason  String?
+  declineNote    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  tutor        TutorProfile @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  pair         Pair?
+
+  @@index([registrationId])
+  @@index([tutorId])
+  @@index([status])
+}
+
+model Pair {
+  id            String   @id @default(cuid())
+  studentId     String
+  tutorId       String
+  offerId       String?  @unique
+  registrationId String? @unique
+  subjects      String[] @default([])
+  effectiveFrom DateTime
+  status        String   @default("aktif") // aktif | selesai | batal
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  student      Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tutor        TutorProfile            @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  offer        TutorOffer?             @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  registration Registration?           @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  sessions     PairSession[]
+  lessons      LessonSession[]
+  changeRequests ScheduleChangeRequest[]
+
+  @@index([studentId])
+  @@index([tutorId])
+}
+
+model PairSession {
+  id        String @id @default(cuid())
+  pairId    String
+  subject   String
+  day       String // Senin ... Minggu
+  dayOfWeek Int // 0 = Minggu ... 6 = Sabtu
+  startTime String // "16.00"
+  endTime   String // "17.30"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pair Pair @relation(fields: [pairId], references: [id], onDelete: Cascade)
+
+  @@index([pairId])
+  @@index([dayOfWeek])
+}
+
+model ScheduleChangeRequest {
+  id              String   @id @default(cuid())
+  pairId          String
+  routineId       String?
+  studentId       String
+  tutorId         String
+  subject         String
+  durationMinutes Int      @default(90)
+  fromWeekday     Int
+  fromStartTime   String
+  toWeekday       Int
+  toStartTime     String
+  scope           String // sekali | seterusnya
+  effectiveDate   DateTime
+  reason          String
+  status          String   @default("ditinjau_pengelola") // ditinjau_pengelola | konfirmasi_tutor | disetujui | ditolak
+  submittedAt     DateTime @default(now())
+  decidedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  pair    Pair    @relation(fields: [pairId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tutor   TutorProfile @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@index([pairId])
+  @@index([status, submittedAt])
+}
+
+model LessonSession {
+  id        String   @id @default(cuid())
+  pairId    String
+  subject   String
+  start     DateTime
+  end       DateTime
+  status    String   @default("terjadwal") // terjadwal | selesai | dibatalkan
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pair        Pair              @relation(fields: [pairId], references: [id], onDelete: Cascade)
+  attendance  AttendanceRecord?
+
+  @@index([pairId])
+  @@index([start])
+  @@index([status])
+}
+
+model AttendanceRecord {
+  id                 String    @id @default(cuid())
+  sessionId          String    @unique
+  held               Boolean
+  actualStart        String?
+  actualEnd          String?
+  studentPresent     Boolean?
+  studentAttendance  String?
+  tutorAttendance    String?
+  topic              String?
+  notes              String?
+  attachmentId       String?
+  attachmentName     String?
+  attachmentSize     Int?
+  cancelReason       String?
+  submittedAt        DateTime  @default(now())
+  validation         String    @default("belum_divalidasi") // belum_divalidasi | sudah_divalidasi | keberatan
+  validatedAt        DateTime?
+  objectionReason    String?
+  objectionAt        DateTime?
+  objectionCorrected Boolean?
+  objectionNote      String?
+  reviewRating       Int?
+  reviewComment      String?
+  reviewSubmittedAt  DateTime?
+  finalizedAt        DateTime?
+  finalizedById      String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  session     LessonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  attachment  File?         @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  finalizedBy User?         @relation("FinalizedAttendance", fields: [finalizedById], references: [id], onDelete: SetNull)
+
+  @@index([validation])
+  @@index([finalizedAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  kind      String // validasi | tagihan | jadwal | pembayaran | les
+  title     String
+  body      String
+  to        String
+  status    String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+model Bill {
+  id        String   @id @default(cuid())
+  number    String   @unique
+  studentId String
+  period    DateTime
+  dueDate   DateTime
+  total     Int
+  paid      Int      @default(0)
+  status    String   @default("belum_bayar") // lunas | sebagian | belum_bayar
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student  Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  items    BillItem[]
+  payments PaymentTransaction[]
+
+  @@index([studentId, period])
+  @@index([status])
+}
+
+model BillItem {
+  id        String @id @default(cuid())
+  billId    String
+  subject   String
+  sessions  Int
+  unitPrice Int
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+}
+
+model PaymentTransaction {
+  id         String    @id @default(cuid())
+  billId     String
+  billPeriod DateTime
+  amount     Int
+  method     String // QRIS | Virtual Account BCA | GoPay
+  status     String // berhasil | kedaluwarsa | gagal
+  externalId String?
+  raw        Json?
+  createdAt  DateTime  @default(now())
+  paidAt     DateTime?
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+  @@index([createdAt])
+}
+
+model HonorRecap {
+  id           String   @id @default(cuid())
+  month        String   @unique // "YYYY-MM"
+  calculatedAt DateTime @default(now())
+  skipped      String[] @default([])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lines HonorLine[]
+}
+
+model HonorLine {
+  id          String @id @default(cuid())
+  recapId     String
+  tutorId     String
+  name        String
+  shortName   String
+  subjectLines Json  @default("[]")
+  sessions    Int
+  total       Int
+  method      String @default("transfer")
+  methodNote  String?
+
+  recap   HonorRecap    @relation(fields: [recapId], references: [id], onDelete: Cascade)
+  tutor   TutorProfile  @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  payment HonorPayment?
+
+  @@index([recapId])
+  @@index([tutorId])
+}
+
+model HonorPayment {
+  id          String   @id @default(cuid())
+  honorLineId String   @unique
+  amount      Int
+  method      String // tunai | transfer
+  paidAt      DateTime
+  proofFileId String?
+  proofName   String?
+  proofSize   Int?
+  recordedAt  DateTime @default(now())
+
+  honorLine HonorLine @relation(fields: [honorLineId], references: [id], onDelete: Cascade)
+  proofFile File?     @relation(fields: [proofFileId], references: [id], onDelete: SetNull)
+}
+
+model File {
+  id           String   @id @default(cuid())
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  driver       String
+  key          String
+  url          String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  uploadedBy       User?              @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  attendanceRecords AttendanceRecord[]
+  honorPayments     HonorPayment[]
+
+  @@index([uploadedById])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

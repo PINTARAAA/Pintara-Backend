@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pintara-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pintara
+      POSTGRES_PASSWORD: pintara
+      POSTGRES_DB: pintara
+    ports:
+      - "5432:5432"
+    volumes:
+      - pintara_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pintara -d pintara"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pintara-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - pintara_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: pintara-minio
+    profiles: ["storage"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: pintara
+      MINIO_ROOT_PASSWORD: pintara-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - pintara_minio:/data
+
+volumes:
+  pintara_pg:
+  pintara_redis:
+  pintara_minio:

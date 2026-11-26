@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+uploads/
+.codegraph/
+coverage/
+*.log
+npm-install.log
+prisma/dev.db
+prisma/dev.db-journal
+prisma/migrations/*_backup/
+.DS_Store
