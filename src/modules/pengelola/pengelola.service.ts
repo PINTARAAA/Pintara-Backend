@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import bcrypt from 'bcryptjs';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { NotificationsService } from '../shared/notifications.service';
 import { SettingsService } from '../shared/settings.service';
 import { StorageService } from '../../infrastructure/storage/storage.service';
+import { ReportsService } from './reports.service';
 import { ApiException } from '../../common/errors';
 import {
   serializeChangeRequestForReview,
@@ -12,6 +14,24 @@ import {
   serializeRegistrationForWali,
   serializeTutorSession,
 } from '../shared/serializers';
+import {
+  accountStatus,
+  billPaid,
+  billStatus,
+  billTotal,
+  deriveDistrict,
+  gradeLabel,
+  linkedStudent,
+  paymentMethodOut,
+  serializeAccountDetail,
+  serializeAccountRow,
+  serializeStudent,
+  serializeStudentBill,
+  serializeStudentRow,
+  serializeTutor,
+  serializeTutorRow,
+  tutorStats,
+} from '../shared/pengelola.serializers';
 import {
   addDays,
   addMinutesToTime,
@@ -29,18 +49,28 @@ import {
   overlaps,
   startOfDay,
   timeToMinutes,
+  toWhatsapp,
 } from '../../common/utils';
 import {
+  AccountInputDto,
   ChangeDecisionDto,
   DeclineOfferDto,
+  LinkStudentsDto,
+  ManualPaymentDto,
   ObjectionReviewDto,
   PayHonorDto,
   RejectRegistrationDto,
+  ReportDto,
+  ResendAllDto,
   SaveScheduleDto,
   SendOfferDto,
+  SettingInputDto,
+  StatusDto,
+  TutorInputDto,
 } from './pengelola.dto';
 
 const BUFFER_MINUTES = 15;
+const TEMP_PASSWORD = 'pintara123';
 
 @Injectable()
 export class PengelolaService {
@@ -49,6 +79,7 @@ export class PengelolaService {
     private readonly notifications: NotificationsService,
     private readonly settings: SettingsService,
     private readonly storage: StorageService,
+    private readonly reports: ReportsService,
   ) {}
 
   private registrationInclude = {
@@ -168,14 +199,21 @@ export class PengelolaService {
   }
 
   async menu(userId: string) {
-    const [user, tutorsTotal, tutorsActive, studentsTotal, studentsActive] =
-      await Promise.all([
-        this.prisma.user.findUnique({ where: { id: userId } }),
-        this.prisma.tutorProfile.count(),
-        this.prisma.tutorProfile.count({ where: { isActive: true } }),
-        this.prisma.student.count(),
-        this.prisma.student.count({ where: { isActive: true } }),
-      ]);
+    const [
+      user,
+      tutorsTotal,
+      tutorsActive,
+      studentsTotal,
+      studentsActive,
+      failedNotifications,
+    ] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: userId } }),
+      this.prisma.tutorProfile.count(),
+      this.prisma.tutorProfile.count({ where: { isActive: true } }),
+      this.prisma.student.count(),
+      this.prisma.student.count({ where: { isActive: true } }),
+      this.notifications.failedCount(),
+    ]);
     return {
       name: user?.name ?? '',
       initials: initials(user?.name ?? ''),
@@ -183,7 +221,7 @@ export class PengelolaService {
       email: user?.email ?? '',
       tutors: { total: tutorsTotal, active: tutorsActive },
       students: { total: studentsTotal, active: studentsActive },
-      failedNotifications: 0,
+      failedNotifications,
     };
   }
 
@@ -281,7 +319,20 @@ export class PengelolaService {
       kind: 'les',
       title: 'Pendaftaran terverifikasi',
       body: `${updated.studentName} · ${updated.number}`,
-      to: `/wali/pendaftaran/${updated.id}`,
+      to: '/wali/pendaftaran/status',
+    });
+    await this.notifications.logEvent({
+      kind: 'hasil-verifikasi',
+      channel: 'whatsapp',
+      recipients: [
+        {
+          name: updated.parentName,
+          role: 'wali',
+          contact: toWhatsapp(updated.parentWhatsapp),
+          accountId: updated.parentId,
+        },
+      ],
+      message: `Halo ${updated.parentName}, pendaftaran ${updated.studentName} sudah diverifikasi. Lihat detailnya di PINTARA.`,
     });
     return serializePengelolaRegistration(updated);
   }
@@ -315,7 +366,20 @@ export class PengelolaService {
       kind: 'les',
       title: 'Pendaftaran ditolak',
       body: dto.message.trim(),
-      to: `/wali/pendaftaran/${updated.id}`,
+      to: '/wali/pendaftaran/status',
+    });
+    await this.notifications.logEvent({
+      kind: 'hasil-verifikasi',
+      channel: 'whatsapp',
+      recipients: [
+        {
+          name: updated.parentName,
+          role: 'wali',
+          contact: toWhatsapp(updated.parentWhatsapp),
+          accountId: updated.parentId,
+        },
+      ],
+      message: `Halo ${updated.parentName}, pendaftaran ${updated.studentName} ditolak. ${dto.message.trim()}`,
     });
     return serializePengelolaRegistration(updated);
   }
@@ -487,10 +551,23 @@ export class PengelolaService {
       include: this.offerInclude,
     });
     await this.notifications.create(offer.tutor.userId, {
-      kind: 'les',
+      kind: 'pengingat',
       title: 'Penawaran mengajar baru',
       body: `${offer.studentName} · ${offer.schedule}`,
-      to: '/tutor/dashboard',
+      to: '/tutor',
+    });
+    await this.notifications.logEvent({
+      kind: 'penawaran-tutor',
+      channel: 'whatsapp',
+      recipients: [
+        {
+          name: offer.tutor.user.name,
+          role: 'tutor',
+          contact: toWhatsapp(offer.tutor.user.whatsapp),
+          accountId: offer.tutor.userId,
+        },
+      ],
+      message: `Halo ${offer.tutor.user.name}, ada penawaran les ${offer.subjects.join(', ')} untuk ${offer.studentName} setiap ${offer.schedule}. Konfirmasi di PINTARA.`,
     });
     return serializeOffer(offer);
   }
@@ -515,7 +592,7 @@ export class PengelolaService {
       kind: 'les',
       title: 'Tutor menerima penawaran',
       body: `${updated.studentName} · ${updated.tutor.user.name}`,
-      to: `/wali/pendaftaran/${updated.registrationId}`,
+      to: '/wali/pendaftaran/status',
     });
     return serializeOffer(updated);
   }
@@ -742,7 +819,7 @@ export class PengelolaService {
       to: '/wali/jadwal',
     });
     await this.notifications.create(pair.tutor.userId, {
-      kind: 'jadwal',
+      kind: 'pengingat',
       title: 'Jadwal les baru',
       body: `${pair.student.name} · ${pair.sessions.map((session: any) => session.day).join(' & ')}`,
       to: '/tutor/jadwal',
@@ -963,6 +1040,23 @@ export class PengelolaService {
         where: { id: { in: ids } },
         data: { finalizedAt: now },
       });
+      const admins = await this.prisma.user.findMany({
+        where: { role: 'pengelola', isActive: true },
+        select: { id: true, name: true, email: true, whatsapp: true },
+      });
+      if (admins.length) {
+        await this.notifications.logEvent({
+          kind: 'rekap-honor',
+          channel: 'aplikasi',
+          recipients: admins.map((admin) => ({
+            name: admin.name,
+            role: 'pengelola' as const,
+            contact: admin.email ?? admin.whatsapp ?? '',
+            accountId: admin.id,
+          })),
+          message: `${ids.length} presensi difinalkan. Rekap honor ${active.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} siap dihitung di PINTARA.`,
+        });
+      }
     }
     return ids.length;
   }
@@ -1029,7 +1123,7 @@ export class PengelolaService {
       body: dto.corrected
         ? `${session.subject} · waktu dikoreksi ${dto.actualStart}–${dto.actualEnd}`
         : `${session.subject} · data tutor dinyatakan sesuai`,
-      to: '/wali/riwayat-les',
+      to: '/wali/riwayat',
     });
     return serializeTutorSession({ ...session, attendance: record });
   }
@@ -1185,6 +1279,29 @@ export class PengelolaService {
         });
       }
     }
+    const totals = new Map(
+      honors.map((honor) => [
+        honor.tutorId,
+        [...honor.subjects.values()].reduce(
+          (sum, sessions) => sum + sessions * (honor.rate ?? 0),
+          0,
+        ),
+      ]),
+    );
+    const tutorUsers = await this.prisma.tutorProfile.findMany({
+      where: { id: { in: [...totals.keys()] } },
+      include: { user: true },
+    });
+    await Promise.all(
+      tutorUsers.map((tutor) =>
+        this.notifications.create(tutor.userId, {
+          kind: 'rekap',
+          title: `Rekap honor ${active.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} siap`,
+          body: `Rp${(totals.get(tutor.id) ?? 0).toLocaleString('id-ID')} · lihat rincian di PINTARA`,
+          to: '/tutor/riwayat',
+        }),
+      ),
+    );
     return {
       tutors: honors.length,
       total: honors.reduce(
@@ -1266,6 +1383,1000 @@ export class PengelolaService {
       },
     });
     return this.honorDetail(monthParam, tutorId);
+  }
+
+  // =====================================================================
+  // Data Master · Tutor & Siswa
+  // =====================================================================
+
+  async tutors(filter: {
+    query?: string;
+    subject?: string;
+    district?: string;
+    status?: string;
+  }) {
+    const rows = await this.prisma.tutorProfile.findMany({
+      include: { user: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const q = filter.query?.trim().toLowerCase();
+    const filtered = rows.filter((tutor) => {
+      const name = tutor.user?.name ?? '';
+      const district = tutor.district ?? deriveDistrict(tutor.address);
+      return (
+        (!q || name.toLowerCase().includes(q)) &&
+        (!filter.subject || tutor.subjects.includes(filter.subject)) &&
+        (!filter.district || district === filter.district) &&
+        (!filter.status || accountStatus(tutor.isActive) === filter.status)
+      );
+    });
+    filtered.sort(byActive);
+    return filtered.map(serializeTutorRow);
+  }
+
+  async tutor(id: string) {
+    const tutor = await this.prisma.tutorProfile.findUnique({
+      where: { id },
+      include: {
+        user: true,
+        pairs: {
+          where: { status: 'aktif' },
+          include: { sessions: true },
+        },
+      },
+    });
+    if (!tutor) throw ApiException.notFound('Tutor tidak ditemukan');
+    return serializeTutor(tutor);
+  }
+
+  async createTutor(dto: TutorInputDto) {
+    const name = normalizeKak(dto.name);
+    const email = dto.email?.trim().toLowerCase() || null;
+    if (email) await this.assertUniqueAccount(email, undefined);
+    const username = await this.uniqueUsername(
+      email ? email.split('@')[0] : name,
+    );
+    const passwordHash = await bcrypt.hash(TEMP_PASSWORD, 10);
+    const tutor = await this.prisma.tutorProfile.create({
+      data: {
+        shortName: shortNameOf(name),
+        initials: initials(name),
+        education: dto.education,
+        subjects: dto.subjects,
+        levels: dto.levels,
+        days: dto.days,
+        availableFrom: dto.from,
+        availableUntil: dto.until,
+        ratePerSession: dto.rate,
+        address: dto.address,
+        district: deriveDistrict(dto.address),
+        user: {
+          create: {
+            name,
+            username,
+            email,
+            whatsapp: dto.phone ?? null,
+            passwordHash,
+            role: 'tutor',
+          },
+        },
+      },
+      include: {
+        user: true,
+        pairs: { where: { status: 'aktif' }, include: { sessions: true } },
+      },
+    });
+    return serializeTutor(tutor);
+  }
+
+  async updateTutor(id: string, dto: TutorInputDto) {
+    const existing = await this.prisma.tutorProfile.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!existing) throw ApiException.notFound('Tutor tidak ditemukan');
+    const name = normalizeKak(dto.name);
+    const email = dto.email?.trim().toLowerCase() || null;
+    if (email) await this.assertUniqueAccount(email, undefined, existing.userId);
+    const tutor = await this.prisma.tutorProfile.update({
+      where: { id },
+      data: {
+        shortName: shortNameOf(name),
+        initials: initials(name),
+        education: dto.education,
+        subjects: dto.subjects,
+        levels: dto.levels,
+        days: dto.days,
+        availableFrom: dto.from,
+        availableUntil: dto.until,
+        ratePerSession: dto.rate,
+        address: dto.address,
+        district: deriveDistrict(dto.address),
+        user: {
+          update: {
+            name,
+            ...(email !== null ? { email } : {}),
+            whatsapp: dto.phone ?? null,
+          },
+        },
+      },
+      include: {
+        user: true,
+        pairs: { where: { status: 'aktif' }, include: { sessions: true } },
+      },
+    });
+    return serializeTutor(tutor);
+  }
+
+  async setTutorStatus(id: string, status: 'aktif' | 'nonaktif') {
+    const tutor = await this.prisma.tutorProfile.findUnique({
+      where: { id },
+    });
+    if (!tutor) throw ApiException.notFound('Tutor tidak ditemukan');
+    if (status === 'nonaktif') {
+      const schedules = await this.prisma.pairSession.count({
+        where: { pair: { tutorId: id, status: 'aktif' } },
+      });
+      if (schedules > 0) {
+        throw ApiException.conflict(
+          'active_schedule',
+          `Masih ada ${schedules} jadwal les aktif.`,
+          { schedules },
+        );
+      }
+    }
+    const active = status === 'aktif';
+    await this.prisma.$transaction([
+      this.prisma.tutorProfile.update({
+        where: { id },
+        data: { isActive: active },
+      }),
+      this.prisma.user.update({
+        where: { id: tutor.userId },
+        data: { isActive: active },
+      }),
+    ]);
+    return this.tutor(id);
+  }
+
+  async students(filter: {
+    query?: string;
+    subject?: string;
+    district?: string;
+    status?: string;
+  }) {
+    const rows = await this.prisma.student.findMany({
+      include: {
+        parent: true,
+        pairs: {
+          include: { tutor: { include: { user: true } } },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const q = filter.query?.trim().toLowerCase();
+    const filtered = rows.filter((student) => {
+      const district = student.district ?? deriveDistrict(student.address);
+      const haystack = [student.name, student.parent?.name ?? '']
+        .join(' ')
+        .toLowerCase();
+      return (
+        (!q || haystack.includes(q)) &&
+        (!filter.subject || student.subjects.includes(filter.subject)) &&
+        (!filter.district || district === filter.district) &&
+        (!filter.status || accountStatus(student.isActive) === filter.status)
+      );
+    });
+    filtered.sort(byActive);
+    return filtered.map(serializeStudentRow);
+  }
+
+  async student(id: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { id },
+      include: {
+        parent: { include: { _count: { select: { students: true } } } },
+        pairs: {
+          include: {
+            sessions: true,
+            tutor: { include: { user: true } },
+          },
+        },
+      },
+    });
+    if (!student) throw ApiException.notFound('Siswa tidak ditemukan');
+    return serializeStudent(student);
+  }
+
+  async setStudentStatus(id: string, status: 'aktif' | 'nonaktif') {
+    const student = await this.prisma.student.findUnique({ where: { id } });
+    if (!student) throw ApiException.notFound('Siswa tidak ditemukan');
+    if (status === 'nonaktif') {
+      const schedules = await this.prisma.pairSession.count({
+        where: { pair: { studentId: id, status: 'aktif' } },
+      });
+      if (schedules > 0) {
+        throw ApiException.conflict(
+          'active_schedule',
+          `Masih ada ${schedules} jadwal les aktif.`,
+          { schedules },
+        );
+      }
+    }
+    const active = status === 'aktif';
+    await this.prisma.student.update({
+      where: { id },
+      data: {
+        isActive: active,
+        endedAt: active ? null : new Date(),
+      },
+    });
+    return this.student(id);
+  }
+
+  // =====================================================================
+  // Manajemen Akun
+  // =====================================================================
+
+  async accounts(filter: { role?: string; query?: string }) {
+    const [users, students] = await Promise.all([
+      this.prisma.user.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.prisma.student.findMany({ select: { id: true, parentId: true } }),
+    ]);
+    const byParent = new Map<string, string[]>();
+    for (const student of students) {
+      const list = byParent.get(student.parentId) ?? [];
+      list.push(student.id);
+      byParent.set(student.parentId, list);
+    }
+    const q = filter.query?.trim().toLowerCase();
+    const match = (user: any) =>
+      !q ||
+      [user.name, user.email ?? '', user.username].some((value: string) =>
+        value.toLowerCase().includes(q),
+      );
+    const counts: Record<string, number> = {
+      wali: 0,
+      tutor: 0,
+      pengelola: 0,
+    };
+    for (const user of users) {
+      if (match(user) && user.role in counts) counts[user.role] += 1;
+    }
+    const role = filter.role ?? 'wali';
+    const items = users
+      .filter((user) => user.role === role && match(user))
+      .sort(byActive)
+      .map((user) => serializeAccountRow(user, byParent.get(user.id) ?? []));
+    return { counts, items };
+  }
+
+  async account(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw ApiException.notFound('Akun tidak ditemukan');
+    const students =
+      user.role === 'wali'
+        ? await this.prisma.student.findMany({
+            where: { parentId: id },
+            orderBy: { name: 'asc' },
+          })
+        : [];
+    return serializeAccountDetail(user, students);
+  }
+
+  async createAccount(dto: AccountInputDto) {
+    const email = dto.email.trim().toLowerCase();
+    const username = dto.username.trim().toLowerCase();
+    await this.assertUniqueAccount(email, username);
+    const passwordHash = await bcrypt.hash(TEMP_PASSWORD, 10);
+    const name = dto.name.trim();
+    const user = await this.prisma.user.create({
+      data: {
+        role: dto.role,
+        name,
+        email,
+        username,
+        whatsapp: dto.phone ?? null,
+        passwordHash,
+      },
+    });
+    if (dto.role === 'wali' && dto.studentIds?.length) {
+      await this.prisma.student.updateMany({
+        where: { id: { in: dto.studentIds } },
+        data: { parentId: user.id },
+      });
+    }
+    if (dto.role === 'tutor') {
+      await this.prisma.tutorProfile.create({
+        data: {
+          userId: user.id,
+          shortName: shortNameOf(name),
+          initials: initials(name),
+          subjects: [],
+          levels: [],
+          days: [],
+        },
+      });
+    }
+    return this.account(user.id);
+  }
+
+  async updateAccount(id: string, dto: AccountInputDto) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw ApiException.notFound('Akun tidak ditemukan');
+    const email = dto.email.trim().toLowerCase();
+    const username = dto.username.trim().toLowerCase();
+    await this.assertUniqueAccount(email, username, id);
+    const name = dto.name.trim();
+    await this.prisma.user.update({
+      where: { id },
+      data: {
+        role: dto.role,
+        name,
+        email,
+        username,
+        whatsapp: dto.phone ?? null,
+      },
+    });
+    if (dto.role === 'wali' && dto.studentIds?.length) {
+      await this.prisma.student.updateMany({
+        where: { id: { in: dto.studentIds } },
+        data: { parentId: id },
+      });
+    }
+    if (user.role === 'tutor' || dto.role === 'tutor') {
+      await this.prisma.tutorProfile.updateMany({
+        where: { userId: id },
+        data: { shortName: shortNameOf(name), initials: initials(name) },
+      });
+    }
+    return this.account(id);
+  }
+
+  async resetAccountPassword(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw ApiException.notFound('Akun tidak ditemukan');
+    const passwordHash = await bcrypt.hash(TEMP_PASSWORD, 10);
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash },
+    });
+    // Password sementara hanya dikirim ke email; tidak pernah dikembalikan API.
+    return { email: user.email };
+  }
+
+  async setAccountStatus(id: string, status: 'aktif' | 'nonaktif') {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw ApiException.notFound('Akun tidak ditemukan');
+    if (status === 'nonaktif' && user.role === 'tutor') {
+      const tutor = await this.prisma.tutorProfile.findUnique({
+        where: { userId: id },
+      });
+      if (tutor) {
+        const schedules = await this.prisma.pairSession.count({
+          where: { pair: { tutorId: tutor.id, status: 'aktif' } },
+        });
+        if (schedules > 0) {
+          throw ApiException.conflict(
+            'active_schedule',
+            `Masih ada ${schedules} jadwal les aktif.`,
+            { schedules },
+          );
+        }
+      }
+    }
+    const active = status === 'aktif';
+    await this.prisma.user.update({
+      where: { id },
+      data: { isActive: active },
+    });
+    if (user.role === 'tutor') {
+      await this.prisma.tutorProfile.updateMany({
+        where: { userId: id },
+        data: { isActive: active },
+      });
+    }
+    return this.account(id);
+  }
+
+  async linkStudents(id: string, dto: LinkStudentsDto) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw ApiException.notFound('Akun tidak ditemukan');
+    if (user.role !== 'wali') {
+      throw ApiException.unprocessable(
+        'Hanya akun wali yang dapat ditautkan ke siswa',
+      );
+    }
+    if (dto.siswaIds.length) {
+      await this.prisma.student.updateMany({
+        where: { id: { in: dto.siswaIds } },
+        data: { parentId: id },
+      });
+    }
+    return this.account(id);
+  }
+
+  async linkableStudents() {
+    const rows = await this.prisma.student.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+    });
+    return rows.map(linkedStudent);
+  }
+
+  // =====================================================================
+  // Rekap & Riwayat Les
+  // =====================================================================
+
+  async lessonRecap(filter: {
+    month?: string;
+    tutorId?: string;
+    studentId?: string;
+  }) {
+    const now = new Date();
+    const current = monthStart(now);
+    const active = filter.month ? parseMonth(filter.month) : current;
+    const pairFilter: any = {};
+    if (filter.tutorId) pairFilter.tutorId = filter.tutorId;
+    if (filter.studentId) pairFilter.studentId = filter.studentId;
+    const where: any = {
+      start: { gte: active, lte: monthEnd(active) },
+      status: { not: 'dibatalkan' },
+    };
+    if (Object.keys(pairFilter).length) where.pair = pairFilter;
+
+    const lessons = await this.prisma.lessonSession.findMany({
+      where,
+      include: {
+        attendance: true,
+        pair: {
+          include: {
+            tutor: { include: { user: true } },
+            student: true,
+          },
+        },
+      },
+      orderBy: { start: 'desc' },
+    });
+
+    const sessions = lessons
+      .filter((lesson) => lesson.start <= now)
+      .map((lesson) => {
+        const record = lesson.attendance;
+        const status = record
+          ? record.held === false
+            ? 'tidak_terlaksana'
+            : record.validation
+          : 'belum_dikumpulkan';
+        const topic =
+          record && record.held !== false && record.topic ? record.topic : null;
+        return {
+          id: lesson.id,
+          date: lesson.start,
+          subject: lesson.subject,
+          topic,
+          tutorId: lesson.pair.tutorId,
+          tutorName: lesson.pair.tutor.user.name,
+          studentId: lesson.pair.studentId,
+          studentName: lesson.pair.student.name,
+          status,
+        };
+      });
+
+    const held = sessions.filter((s) => s.status !== 'tidak_terlaksana');
+    const missed = sessions.filter((s) => s.status === 'tidak_terlaksana');
+    const tutorGroups = new Map<string, typeof sessions>();
+    const studentGroups = new Map<string, typeof sessions>();
+    for (const session of sessions) {
+      tutorGroups.set(session.tutorId, [
+        ...(tutorGroups.get(session.tutorId) ?? []),
+        session,
+      ]);
+      studentGroups.set(session.studentId, [
+        ...(studentGroups.get(session.studentId) ?? []),
+        session,
+      ]);
+    }
+    const [tutors, students] = await Promise.all([
+      this.prisma.tutorProfile.findMany({
+        where: { isActive: true },
+        include: { user: true },
+      }),
+      this.prisma.student.findMany({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+
+    return {
+      months: [
+        current,
+        new Date(current.getFullYear(), current.getMonth() - 1, 1),
+      ],
+      month: active,
+      tutorOptions: tutors
+        .map((tutor) => ({ id: tutor.id, name: tutor.user.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      studentOptions: students.map((student) => ({
+        id: student.id,
+        name: student.name,
+      })),
+      held: held.length,
+      missed: missed.length,
+      pairs: new Set(
+        sessions.map((s) => `${s.tutorId}|${s.studentId}`),
+      ).size,
+      byTutor: [...tutorGroups.values()]
+        .map((list) => ({
+          id: list[0].tutorId,
+          name: list[0].tutorName,
+          sessions: list.filter((s) => s.status !== 'tidak_terlaksana').length,
+          missed: list.filter((s) => s.status === 'tidak_terlaksana').length,
+          students: new Set(list.map((s) => s.studentId)).size,
+        }))
+        .sort(
+          (a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name),
+        ),
+      byStudent: [...studentGroups.values()]
+        .map((list) => ({
+          id: list[0].studentId,
+          name: list[0].studentName,
+          sessions: list.filter((s) => s.status !== 'tidak_terlaksana').length,
+          missed: list.filter((s) => s.status === 'tidak_terlaksana').length,
+          tutors: [...new Set(list.map((s) => s.tutorName))],
+        }))
+        .sort(
+          (a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name),
+        ),
+      sessions: sessions.sort(
+        (a, b) =>
+          b.date.getTime() - a.date.getTime() ||
+          a.studentName.localeCompare(b.studentName),
+      ),
+    };
+  }
+
+  // =====================================================================
+  // Laporan Keuangan
+  // =====================================================================
+
+  async financeSummary(month?: string) {
+    const now = new Date();
+    const current = monthStart(now);
+    const active = month ? parseMonth(month) : current;
+    const months = financeMonths(current);
+    const bills = await this.prisma.bill.findMany({
+      where: { period: { gte: active, lte: monthEnd(active) } },
+      include: {
+        items: true,
+        payments: true,
+        student: { include: { parent: true } },
+      },
+    });
+    if (!bills.length) {
+      return { state: 'kosong', months, month: active };
+    }
+    const statuses = bills.map((bill) => billStatus(bill));
+    const allPayments = bills.flatMap((bill) => bill.payments);
+    const successful = allPayments.filter(
+      (payment) => payment.status === 'berhasil',
+    );
+    const billsTotal = bills.reduce((sum, bill) => sum + billTotal(bill), 0);
+    const recap = await this.prisma.honorRecap.findUnique({
+      where: { month: monthKey(active) },
+      include: { lines: { include: { payment: true } } },
+    });
+
+    let honor: {
+      total: number;
+      sessions: number;
+      tutors: number;
+      calculated: boolean;
+    };
+    let honorPaid: { amount: number; tutors: number };
+    if (recap) {
+      const lines = recap.lines;
+      honor = {
+        total: lines.reduce((sum, line) => sum + line.total, 0),
+        sessions: lines.reduce((sum, line) => sum + line.sessions, 0),
+        tutors: lines.length,
+        calculated: true,
+      };
+      honorPaid = {
+        amount: lines.reduce(
+          (sum, line) => sum + Math.min(line.payment?.amount ?? 0, line.total),
+          0,
+        ),
+        tutors: lines.filter(
+          (line) => line.payment && line.payment.amount >= line.total,
+        ).length,
+      };
+    } else {
+      const finals = await this.finalLessons(active);
+      const grouped = new Map<
+        string,
+        { rate: number | null; sessions: number }
+      >();
+      for (const lesson of finals) {
+        const tutor = lesson.pair.tutor;
+        const entry = grouped.get(tutor.id) ?? {
+          rate: tutor.ratePerSession,
+          sessions: 0,
+        };
+        entry.sessions += 1;
+        grouped.set(tutor.id, entry);
+      }
+      const entries = [...grouped.values()];
+      const priced = entries.filter((entry) => entry.rate !== null);
+      honor = {
+        total: priced.reduce(
+          (sum, entry) => sum + entry.sessions * (entry.rate ?? 0),
+          0,
+        ),
+        sessions: entries.reduce((sum, entry) => sum + entry.sessions, 0),
+        tutors: priced.length,
+        calculated: false,
+      };
+      honorPaid = { amount: 0, tutors: 0 };
+    }
+
+    return {
+      state: 'ada',
+      months,
+      month: active,
+      bills: {
+        total: billsTotal,
+        count: bills.length,
+        lunas: statuses.filter((status) => status === 'lunas').length,
+        sebagian: statuses.filter((status) => status === 'sebagian').length,
+        belum: statuses.filter((status) => status === 'belum_bayar').length,
+      },
+      payments: {
+        received: successful.reduce(
+          (sum, payment) => sum + payment.amount,
+          0,
+        ),
+        transactions: successful.length,
+        failed: allPayments.filter((payment) => payment.status !== 'berhasil')
+          .length,
+      },
+      honor,
+      honorPaid,
+      institutionShare: billsTotal - honor.total,
+    };
+  }
+
+  async studentBills(month?: string) {
+    const now = new Date();
+    const current = monthStart(now);
+    const active = month ? parseMonth(month) : current;
+    const bills = await this.prisma.bill.findMany({
+      where: { period: { gte: active, lte: monthEnd(active) } },
+      include: { items: true, payments: true, student: true },
+    });
+    const rows = bills.map((bill) => {
+      const total = billTotal(bill);
+      const paid = billPaid(bill);
+      return {
+        id: bill.id,
+        studentName: bill.student.name,
+        sessions: bill.items.reduce((sum, item) => sum + item.sessions, 0),
+        dueDate: bill.dueDate,
+        total,
+        remaining: Math.max(total - paid, 0),
+        status: billStatus(bill),
+      };
+    });
+    const total = rows.reduce((sum, row) => sum + row.total, 0);
+    const remaining = rows.reduce((sum, row) => sum + row.remaining, 0);
+    const byRemaining = (a: any, b: any) => b.remaining - a.remaining;
+    return {
+      months: financeMonths(current),
+      month: active,
+      total,
+      paid: total - remaining,
+      remaining,
+      unpaid: rows
+        .filter((row) => row.status === 'belum_bayar')
+        .sort(byRemaining),
+      partial: rows.filter((row) => row.status === 'sebagian').sort(byRemaining),
+      paidOff: rows
+        .filter((row) => row.status === 'lunas')
+        .sort((a, b) => a.studentName.localeCompare(b.studentName)),
+    };
+  }
+
+  async studentBill(id: string) {
+    const bill = await this.prisma.bill.findUnique({
+      where: { id },
+      include: {
+        items: true,
+        payments: true,
+        student: { include: { parent: true } },
+      },
+    });
+    if (!bill) throw ApiException.notFound('Tagihan tidak ditemukan');
+    return serializeStudentBill(bill);
+  }
+
+  async recordManualPayment(
+    userId: string,
+    id: string,
+    dto: ManualPaymentDto,
+  ) {
+    const bill = await this.prisma.bill.findUnique({
+      where: { id },
+      include: {
+        items: true,
+        payments: true,
+        student: { include: { parent: true } },
+      },
+    });
+    if (!bill) throw ApiException.notFound('Tagihan tidak ditemukan');
+    const total = billTotal(bill);
+    const paid = billPaid(bill);
+    const remaining = Math.max(total - paid, 0);
+    if (dto.amount <= 0 || dto.amount > remaining) {
+      throw ApiException.unprocessable(
+        'Nominal pembayaran tidak valid',
+        { remaining },
+      );
+    }
+    await this.prisma.paymentTransaction.create({
+      data: {
+        billId: id,
+        billPeriod: bill.period,
+        amount: dto.amount,
+        method: dto.method,
+        status: 'berhasil',
+        paidAt: new Date(dto.paidAt),
+        ...(dto.proof ? { manual: { proof: dto.proof } } : {}),
+      },
+    });
+    const newPaid = paid + dto.amount;
+    const status =
+      newPaid >= total ? 'lunas' : newPaid > 0 ? 'sebagian' : 'belum_bayar';
+    await this.prisma.bill.update({
+      where: { id },
+      data: { paid: newPaid, status },
+    });
+    await this.notifications.create(bill.student.parentId, {
+      kind: 'pembayaran',
+      title: 'Pembayaran tagihan diterima',
+      body: `Rp${dto.amount.toLocaleString('id-ID')} · ${bill.number}`,
+      to: '/wali/tagihan',
+    });
+    return this.studentBill(id);
+  }
+
+  async generateReport(userId: string, dto: ReportDto) {
+    const active = parseMonth(dto.month);
+    const file = await this.reports.generate(active, dto.type, dto.format);
+    const saved = await this.storage.saveBuffer(
+      file.buffer,
+      file.name,
+      file.mime,
+      userId,
+    );
+    return { name: saved.name, size: saved.size, url: saved.url };
+  }
+
+  // =====================================================================
+  // Pengaturan Notifikasi
+  // =====================================================================
+
+  async notificationSettings() {
+    const rows = await this.prisma.notificationSetting.findMany({
+      orderBy: { sortOrder: 'asc' },
+    });
+    return rows.map(serializeNotificationSetting);
+  }
+
+  async notificationSetting(id: string) {
+    const row = await this.prisma.notificationSetting.findUnique({
+      where: { id },
+    });
+    if (!row) throw ApiException.notFound('Pengaturan tidak ditemukan');
+    return serializeNotificationSetting(row);
+  }
+
+  async saveNotificationSetting(id: string, dto: SettingInputDto) {
+    const row = await this.prisma.notificationSetting.findUnique({
+      where: { id },
+    });
+    if (!row) throw ApiException.notFound('Pengaturan tidak ditemukan');
+    if (dto.template !== undefined) {
+      const used = [...dto.template.matchAll(/\{([^{}]*)\}/g)].map((match) =>
+        match[1].trim(),
+      );
+      const unknown = [
+        ...new Set(used.filter((name) => !row.variables.includes(name))),
+      ];
+      if (unknown.length) {
+        throw ApiException.unprocessable(
+          `Variabel ${unknown.map((name) => `{${name}}`).join(', ')} tidak dikenal.`,
+          { variables: unknown },
+        );
+      }
+    }
+    const updated = await this.prisma.notificationSetting.update({
+      where: { id },
+      data: {
+        ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
+        ...(dto.channel !== undefined ? { channel: dto.channel } : {}),
+        ...(dto.timing !== undefined ? { timing: dto.timing } : {}),
+        ...(dto.template !== undefined ? { template: dto.template } : {}),
+      },
+    });
+    return serializeNotificationSetting(updated);
+  }
+
+  // =====================================================================
+  // Riwayat Notifikasi
+  // =====================================================================
+
+  async notificationLogs(filter: {
+    status?: string;
+    kind?: string;
+    period?: string;
+  }) {
+    const rows = await this.prisma.notificationLog.findMany({
+      orderBy: { sentAt: 'desc' },
+    });
+    const now = new Date();
+    const period = filter.period ?? 'bulan-ini';
+    const list = rows
+      .filter(
+        (log) =>
+          inPeriod(log.resentAt ?? log.sentAt, period, now) &&
+          (!filter.kind || log.kind === filter.kind),
+      )
+      .sort(
+        (a, b) =>
+          (b.resentAt ?? b.sentAt).getTime() -
+          (a.resentAt ?? a.sentAt).getTime(),
+      );
+    return {
+      failed:
+        filter.status === 'terkirim'
+          ? []
+          : list
+              .filter((log) => log.status === 'gagal')
+              .map(serializeNotificationLog),
+      sent:
+        filter.status === 'gagal'
+          ? []
+          : list
+              .filter((log) => log.status === 'terkirim')
+              .map(serializeNotificationLog),
+    };
+  }
+
+  async notificationLog(id: string) {
+    const row = await this.prisma.notificationLog.findUnique({
+      where: { id },
+    });
+    if (!row) throw ApiException.notFound('Log notifikasi tidak ditemukan');
+    return serializeNotificationLog(row);
+  }
+
+  async resendNotification(id: string) {
+    const row = await this.prisma.notificationLog.findUnique({
+      where: { id },
+    });
+    if (!row) throw ApiException.notFound('Log notifikasi tidak ditemukan');
+    const now = new Date();
+    if (row.permanent) {
+      await this.prisma.notificationLog.update({
+        where: { id },
+        data: { attempts: row.attempts + 1, lastAttemptAt: now },
+      });
+      throw ApiException.conflict(
+        'resend_failed',
+        `Kirim ulang gagal: ${row.reason ?? 'kontak tidak valid'}.`,
+        { reason: row.reason ?? 'kontak tidak valid', permanent: true },
+      );
+    }
+    const updated = await this.prisma.notificationLog.update({
+      where: { id },
+      data: {
+        attempts: row.attempts + 1,
+        lastAttemptAt: now,
+        status: 'terkirim',
+        reason: null,
+        reasonShort: null,
+        resentAt: now,
+      },
+    });
+    return serializeNotificationLog(updated);
+  }
+
+  async resendAllNotifications(dto: ResendAllDto) {
+    const now = new Date();
+    const rows = await this.prisma.notificationLog.findMany({
+      where: { status: 'gagal', ...(dto.jenis ? { kind: dto.jenis } : {}) },
+    });
+    const targets = dto.periode
+      ? rows.filter((log) => inPeriod(log.sentAt, dto.periode!, now))
+      : rows;
+    const sent: string[] = [];
+    let stillFailed = 0;
+    for (const log of targets) {
+      if (log.permanent) {
+        await this.prisma.notificationLog.update({
+          where: { id: log.id },
+          data: { attempts: log.attempts + 1, lastAttemptAt: now },
+        });
+        stillFailed += 1;
+        continue;
+      }
+      await this.prisma.notificationLog.update({
+        where: { id: log.id },
+        data: {
+          attempts: log.attempts + 1,
+          lastAttemptAt: now,
+          status: 'terkirim',
+          reason: null,
+          reasonShort: null,
+          resentAt: now,
+        },
+      });
+      const recipients = Array.isArray(log.recipients)
+        ? (log.recipients as any[])
+        : [];
+      sent.push(recipients.map((recipient) => recipient.name).join(', '));
+    }
+    return { sent, stillFailed };
+  }
+
+  // =====================================================================
+  // Helper akun
+  // =====================================================================
+
+  private async assertUniqueAccount(
+    email?: string,
+    username?: string,
+    excludeId?: string,
+  ) {
+    if (email) {
+      const found = await this.prisma.user.findUnique({ where: { email } });
+      if (found && found.id !== excludeId) {
+        throw ApiException.conflict(
+          'duplicate_field',
+          'Email sudah dipakai akun lain.',
+          { field: 'email' },
+        );
+      }
+    }
+    if (username) {
+      const found = await this.prisma.user.findUnique({
+        where: { username },
+      });
+      if (found && found.id !== excludeId) {
+        throw ApiException.conflict(
+          'duplicate_field',
+          'Username sudah dipakai akun lain.',
+          { field: 'username' },
+        );
+      }
+    }
+  }
+
+  private async uniqueUsername(base: string) {
+    const slug =
+      base
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '.')
+        .replace(/^\.+|\.+$/g, '') || 'pengguna';
+    let candidate = slug;
+    let suffix = 1;
+    while (
+      await this.prisma.user.findUnique({ where: { username: candidate } })
+    ) {
+      candidate = `${slug}${suffix}`;
+      suffix += 1;
+    }
+    return candidate;
   }
 
   listNotifications(userId: string) {
@@ -1716,4 +2827,86 @@ function joinAnd(items: string[]) {
 
 function km(value: number) {
   return value.toLocaleString('id-ID', { maximumFractionDigits: 1 });
+}
+
+function byActive(a: any, b: any) {
+  if (a.isActive === b.isActive) return 0;
+  return a.isActive ? -1 : 1;
+}
+
+function normalizeKak(name: string) {
+  const trimmed = name.trim();
+  return /^kak\s/i.test(trimmed) ? trimmed : `Kak ${trimmed}`;
+}
+
+function shortNameOf(name: string) {
+  const cleaned = name.replace(/^kak\s+/i, '');
+  const first = cleaned.split(/\s+/)[0] ?? cleaned;
+  return `Kak ${first}`;
+}
+
+function financeMonths(current: Date) {
+  return [
+    new Date(current.getFullYear(), current.getMonth() + 1, 1),
+    current,
+    new Date(current.getFullYear(), current.getMonth() - 1, 1),
+  ];
+}
+
+function serializeNotificationSetting(row: any) {
+  return {
+    id: row.id,
+    group: row.group,
+    title: row.title,
+    screenTitle: row.screenTitle,
+    recipient: row.recipient,
+    trigger: row.trigger,
+    activeNote: row.activeNote,
+    enabled: row.enabled,
+    channel: row.channel,
+    timing: row.timing,
+    template: row.template,
+    variables: row.variables,
+    sample: row.sample,
+    previewNote: row.previewNote,
+  };
+}
+
+function serializeNotificationLog(row: any) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    channel: row.channel,
+    recipients: row.recipients,
+    sentAt: row.sentAt,
+    status: row.status,
+    message: row.message,
+    attempts: row.attempts,
+    lastAttemptAt: row.lastAttemptAt,
+    ...(row.reason ? { reason: row.reason } : {}),
+    ...(row.reasonShort ? { reasonShort: row.reasonShort } : {}),
+    ...(row.permanent ? { permanent: true } : {}),
+    ...(row.resentAt ? { resentAt: row.resentAt } : {}),
+  };
+}
+
+function inPeriod(date: Date, period: string, now = new Date()) {
+  if (period === 'hari-ini') return isSameDay(date, now);
+  if (period === '7-hari') {
+    return date >= addDays(startOfDay(now), -6);
+  }
+  if (period === 'bulan-ini') {
+    return (
+      date.getFullYear() === now.getFullYear() &&
+      date.getMonth() === now.getMonth()
+    );
+  }
+  if (period === 'bulan-lalu') {
+    const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return (
+      date.getFullYear() === previous.getFullYear() &&
+      date.getMonth() === previous.getMonth()
+    );
+  }
+  return true;
 }

@@ -270,11 +270,28 @@ export class WaliService {
     });
 
     await this.notifications.notifyRole('pengelola', {
-      kind: 'les',
+      kind: 'pendaftaran',
       title: 'Pendaftaran baru menunggu verifikasi',
       body: `${registration.studentName} · ${registration.number}`,
       to: `/pengelola/pendaftaran/${registration.id}`,
     });
+    const admins = await this.prisma.user.findMany({
+      where: { role: 'pengelola', isActive: true },
+      select: { id: true, name: true, email: true, whatsapp: true },
+    });
+    if (admins.length) {
+      await this.notifications.logEvent({
+        kind: 'pendaftaran-baru',
+        channel: 'aplikasi',
+        recipients: admins.map((admin) => ({
+          name: admin.name,
+          role: 'pengelola' as const,
+          contact: admin.email ?? admin.whatsapp ?? '',
+          accountId: admin.id,
+        })),
+        message: `Pendaftaran baru dari ${registration.parentName} untuk ${registration.studentName} (${registration.grade} ${registration.level}). Segera verifikasi di PINTARA.`,
+      });
+    }
 
     return {
       id: registration.id,
@@ -478,10 +495,10 @@ export class WaliService {
       },
     });
     await this.notifications.notifyRole('pengelola', {
-      kind: 'jadwal',
+      kind: 'perubahan-jadwal',
       title: 'Pengajuan perubahan jadwal',
       body: `${request.student.name} · ${dayName(request.fromWeekday)} → ${dayName(request.toWeekday)} ${request.toStartTime}`,
-      to: `/pengelola/les/pengajuan/${request.id}`,
+      to: `/pengelola/les/jadwal/pengajuan/${request.id}`,
     });
     return serializeChangeRequest(request);
   }
@@ -557,7 +574,7 @@ export class WaliService {
       data: { validation: 'sudah_divalidasi', validatedAt: new Date() },
     });
     await this.notifications.create(session.pair.tutor.userId, {
-      kind: 'validasi',
+      kind: 'presensi',
       title: 'Presensi divalidasi wali',
       body: `${session.subject} · ${session.pair.student.name}`,
       to: `/tutor/presensi/${session.id}`,
@@ -579,16 +596,39 @@ export class WaliService {
       },
     });
     await this.notifications.create(session.pair.tutor.userId, {
-      kind: 'validasi',
+      kind: 'keberatan',
       title: 'Presensi diajukan keberatan',
       body: `${session.subject} · ${session.pair.student.name}`,
-      to: `/tutor/presensi/${session.id}`,
+      to: `/tutor/presensi/status/${session.id}`,
     });
     await this.notifications.notifyRole('pengelola', {
-      kind: 'validasi',
+      kind: 'keberatan',
       title: 'Keberatan presensi baru',
       body: `${session.pair.student.name} · ${session.subject}`,
-      to: `/pengelola/les/keberatan/${session.id}`,
+      to: `/pengelola/presensi/keberatan/${session.id}`,
+    });
+    const admins = await this.prisma.user.findMany({
+      where: { role: 'pengelola', isActive: true },
+      select: { id: true, name: true, email: true, whatsapp: true },
+    });
+    await this.notifications.logEvent({
+      kind: 'keberatan-presensi',
+      channel: 'aplikasi',
+      recipients: [
+        ...admins.map((admin) => ({
+          name: admin.name,
+          role: 'pengelola' as const,
+          contact: admin.email ?? admin.whatsapp ?? '',
+          accountId: admin.id,
+        })),
+        {
+          name: session.pair.tutor.user.name,
+          role: 'tutor' as const,
+          contact: session.pair.tutor.user.whatsapp ?? '',
+          accountId: session.pair.tutor.userId,
+        },
+      ],
+      message: `${session.pair.student.parent?.name ?? 'Wali'} mengajukan keberatan atas presensi ${session.subject} ${session.pair.student.name} pada ${session.start.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}.`,
     });
     return serializeAttendanceSession({ ...session, attendance: updated });
   }

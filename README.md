@@ -287,6 +287,22 @@ Base URL: `http://localhost:4000` (tanpa prefix).
 | GET/POST | `/pengelola/presensi/:id/keberatan` | pengelola |
 | GET | `/pengelola/honor`, `/pengelola/honor/:bulan/:tutorId` | pengelola |
 | POST | `/pengelola/honor/hitung`, `/pengelola/honor/:bulan/:tutorId/bayar` | pengelola |
+| GET/POST | `/pengelola/tutor` | pengelola (data master) |
+| GET/PUT | `/pengelola/tutor/:id` | pengelola |
+| PATCH | `/pengelola/tutor/:id/status` | pengelola (409 bila jadwal aktif) |
+| GET | `/pengelola/siswa`, `/pengelola/siswa/:id` | pengelola |
+| PATCH | `/pengelola/siswa/:id/status` | pengelola (409 bila jadwal aktif) |
+| GET | `/pengelola/akun`, `/pengelola/akun/siswa`, `/pengelola/akun/:id` | pengelola |
+| POST | `/pengelola/akun`, `/pengelola/akun/:id/reset-password` | pengelola |
+| PUT | `/pengelola/akun/:id`, `/pengelola/akun/:id/siswa` | pengelola |
+| PATCH | `/pengelola/akun/:id/status` | pengelola |
+| GET | `/pengelola/riwayat-les` | pengelola |
+| GET | `/pengelola/laporan-keuangan`, `/pengelola/tagihan`, `/pengelola/tagihan/:id` | pengelola |
+| POST | `/pengelola/laporan-keuangan/unduh`, `/pengelola/tagihan/:id/pembayaran` | pengelola |
+| GET | `/pengelola/pengaturan-notifikasi`, `/pengelola/pengaturan-notifikasi/:id` | pengelola |
+| PUT | `/pengelola/pengaturan-notifikasi/:id` | pengelola (422 bila variabel tak dikenal) |
+| GET | `/pengelola/riwayat-notifikasi`, `/pengelola/riwayat-notifikasi/:id` | pengelola |
+| POST | `/pengelola/riwayat-notifikasi/:id/kirim-ulang`, `/pengelola/riwayat-notifikasi/kirim-ulang` | pengelola |
 | GET | `/{wali,tutor,pengelola}/notifikasi` | peran masing-masing |
 | POST | `/{wali,tutor,pengelola}/notifikasi/:id/dibaca`, `/notifikasi/dibaca-semua` | peran masing-masing |
 | POST | `/{wali,tutor,pengelola}/notifikasi/:id/read`, `/notifikasi/read-all` | alias |
@@ -300,6 +316,11 @@ Detail payload, contoh `curl`, dan bentuk respons ada di [`docs/API.md`](docs/AP
 - **Bentrok jadwal**: disimpan/ditolak jika tutor sudah mengajar pada hari dan jam yang beririsan (termasuk buffer 15 menit).
 - **Pembayaran**: disimulasikan. Metode `QRIS`, `Virtual Account BCA`, `GoPay`; status `berhasil`, `kedaluwarsa`, `gagal`. Nominal tidak boleh melebihi sisa tagihan. `simulateFailure: true` menghasilkan status `kedaluwarsa` (sesuai mock frontend dan layar "Pembayaran gagal").
 - **Honor**: dihitung dari sesi yang sudah difinalisasi pada bulan berjalan, memakai tarif tutor per mapel. Pembayaran honor mengurangi total belum dibayar.
+- **Data master**: tutor dan siswa tidak pernah dihapus, hanya dinonaktifkan. Penonaktifan ditolak `409 active_schedule` selama masih ada jadwal les aktif.
+- **Akun**: pembuatan akun/tutor dan reset password memakai password sementara (default `pintara123`) yang dikirim ke email. Password tidak pernah dikembalikan API; email/username duplikat → `409 duplicate_field`.
+- **Laporan**: `POST /pengelola/laporan-keuangan/unduh` menghasilkan berkas PDF (`pdfkit`) atau XLSX (`exceljs`) sungguhan yang disimpan lewat storage (lokal/S3).
+- **Pengaturan notifikasi**: template memakai variabel `{nama}`; variabel tak dikenal ditolak `422 VALIDATION_ERROR` dengan `details.variables`.
+- **Riwayat notifikasi**: log dicatat dari kejadian nyata dan dapat dikirim ulang; log dengan kontak tidak valid tetap gagal (`permanent`).
 - **Notifikasi**: setiap aksi penting (verifikasi, penawaran, jadwal, presensi, pembayaran) membuat notifikasi untuk peran terkait.
 - **Tanggal**: dikirim sebagai ISO-8601 UTC. Frontend menampilkan dalam zona Asia/Jakarta.
 - **Uang**: integer rupiah tanpa desimal.

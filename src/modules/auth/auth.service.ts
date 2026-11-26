@@ -40,6 +40,11 @@ export class AuthService {
       name: user.name,
     });
 
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
     return {
       id: user.id,
       name: user.name,

@@ -321,6 +321,263 @@ check(
     hasKeys(pengelolaNotifications.json, ['unread', 'read']),
 );
 
+/* ---------- Pengelola · Data Master & Manajemen Akun ---------- */
+
+const tutorList = await request('GET', '/pengelola/tutor', { token: pengelola?.token });
+check(
+  'GET /pengelola/tutor',
+  tutorList.status === 200 &&
+    isArray(tutorList.json) &&
+    (tutorList.json.length === 0 ||
+      hasKeys(tutorList.json[0], ['id', 'name', 'subjects', 'levels', 'district', 'rate', 'status'])),
+  JSON.stringify(tutorList.json).slice(0, 160),
+);
+
+const tutorId = tutorList.json?.[0]?.id;
+if (tutorId) {
+  const tutorDetail = await request('GET', `/pengelola/tutor/${tutorId}`, {
+    token: pengelola?.token,
+  });
+  check(
+    'GET /pengelola/tutor/:id',
+    tutorDetail.status === 200 &&
+      hasKeys(tutorDetail.json, [
+        'id',
+        'name',
+        'phone',
+        'email',
+        'education',
+        'subjects',
+        'levels',
+        'days',
+        'from',
+        'until',
+        'address',
+        'district',
+        'rate',
+        'pickup',
+        'joinedAt',
+        'activeStudents',
+        'activeSchedules',
+        'status',
+      ]),
+    JSON.stringify(tutorDetail.json).slice(0, 160),
+  );
+}
+
+const studentList = await request('GET', '/pengelola/siswa', { token: pengelola?.token });
+check(
+  'GET /pengelola/siswa',
+  studentList.status === 200 &&
+    isArray(studentList.json) &&
+    (studentList.json.length === 0 ||
+      hasKeys(studentList.json[0], ['id', 'name', 'grade', 'subjects', 'status', 'tutorNames'])),
+  JSON.stringify(studentList.json).slice(0, 160),
+);
+
+const studentId = studentList.json?.[0]?.id;
+if (studentId) {
+  const studentDetail = await request('GET', `/pengelola/siswa/${studentId}`, {
+    token: pengelola?.token,
+  });
+  check(
+    'GET /pengelola/siswa/:id',
+    studentDetail.status === 200 &&
+      hasKeys(studentDetail.json, [
+        'id',
+        'name',
+        'grade',
+        'school',
+        'address',
+        'district',
+        'subjects',
+        'needs',
+        'guardian',
+        'lessons',
+        'status',
+      ]),
+    JSON.stringify(studentDetail.json).slice(0, 160),
+  );
+}
+
+const accounts = await request('GET', '/pengelola/akun?peran=wali', {
+  token: pengelola?.token,
+});
+check(
+  'GET /pengelola/akun?peran=wali',
+  accounts.status === 200 &&
+    hasKeys(accounts.json, ['counts', 'items']) &&
+    hasKeys(accounts.json?.counts, ['wali', 'tutor', 'pengelola']),
+);
+
+const accountId = accounts.json?.items?.[0]?.id;
+if (accountId) {
+  const accountDetail = await request('GET', `/pengelola/akun/${accountId}`, {
+    token: pengelola?.token,
+  });
+  check(
+    'GET /pengelola/akun/:id',
+    accountDetail.status === 200 &&
+      hasKeys(accountDetail.json, [
+        'id',
+        'role',
+        'name',
+        'email',
+        'username',
+        'phone',
+        'createdAt',
+        'lastLoginAt',
+        'status',
+        'studentIds',
+        'students',
+      ]),
+    JSON.stringify(accountDetail.json).slice(0, 160),
+  );
+}
+
+const linkable = await request('GET', '/pengelola/akun/siswa', { token: pengelola?.token });
+check(
+  'GET /pengelola/akun/siswa',
+  linkable.status === 200 &&
+    isArray(linkable.json) &&
+    (linkable.json.length === 0 ||
+      hasKeys(linkable.json[0], ['id', 'name', 'grade', 'status'])),
+);
+
+/* ---------- Pengelola · Rekap & Laporan ---------- */
+
+const lessonRecap = await request('GET', '/pengelola/riwayat-les', { token: pengelola?.token });
+check(
+  'GET /pengelola/riwayat-les',
+  lessonRecap.status === 200 &&
+    hasKeys(lessonRecap.json, [
+      'months',
+      'month',
+      'tutorOptions',
+      'studentOptions',
+      'held',
+      'missed',
+      'pairs',
+      'byTutor',
+      'byStudent',
+      'sessions',
+    ]),
+  JSON.stringify(lessonRecap.json).slice(0, 160),
+);
+
+const finance = await request('GET', '/pengelola/laporan-keuangan', { token: pengelola?.token });
+check(
+  'GET /pengelola/laporan-keuangan',
+  finance.status === 200 &&
+    hasKeys(finance.json, ['state', 'months', 'month']) &&
+    (finance.json?.state === 'kosong' ||
+      hasKeys(finance.json, ['bills', 'payments', 'honor', 'honorPaid', 'institutionShare'])),
+  JSON.stringify(finance.json).slice(0, 160),
+);
+
+const bills = await request('GET', '/pengelola/tagihan', { token: pengelola?.token });
+check(
+  'GET /pengelola/tagihan',
+  bills.status === 200 &&
+    hasKeys(bills.json, ['months', 'month', 'total', 'paid', 'remaining', 'unpaid', 'partial', 'paidOff']),
+  JSON.stringify(bills.json).slice(0, 160),
+);
+
+const billRow = [
+  ...(bills.json?.unpaid ?? []),
+  ...(bills.json?.partial ?? []),
+  ...(bills.json?.paidOff ?? []),
+][0];
+if (billRow) {
+  const billDetail = await request('GET', `/pengelola/tagihan/${billRow.id}`, {
+    token: pengelola?.token,
+  });
+  check(
+    'GET /pengelola/tagihan/:id',
+    billDetail.status === 200 &&
+      hasKeys(billDetail.json, [
+        'id',
+        'number',
+        'studentName',
+        'guardianName',
+        'period',
+        'dueDate',
+        'items',
+        'payments',
+      ]),
+    JSON.stringify(billDetail.json).slice(0, 160),
+  );
+}
+
+/* ---------- Pengelola · Pengaturan & Riwayat Notifikasi ---------- */
+
+const settings = await request('GET', '/pengelola/pengaturan-notifikasi', {
+  token: pengelola?.token,
+});
+check(
+  'GET /pengelola/pengaturan-notifikasi',
+  settings.status === 200 &&
+    isArray(settings.json) &&
+    (settings.json.length === 0 ||
+      hasKeys(settings.json[0], [
+        'id',
+        'group',
+        'title',
+        'screenTitle',
+        'recipient',
+        'trigger',
+        'activeNote',
+        'enabled',
+        'channel',
+        'timing',
+        'template',
+        'variables',
+        'sample',
+        'previewNote',
+      ])),
+);
+
+const settingId = settings.json?.[0]?.id;
+if (settingId) {
+  const settingDetail = await request('GET', `/pengelola/pengaturan-notifikasi/${settingId}`, {
+    token: pengelola?.token,
+  });
+  check(
+    'GET /pengelola/pengaturan-notifikasi/:id',
+    settingDetail.status === 200 &&
+      hasKeys(settingDetail.json, ['id', 'group', 'enabled', 'channel', 'template', 'variables']),
+  );
+}
+
+const logs = await request('GET', '/pengelola/riwayat-notifikasi', { token: pengelola?.token });
+check(
+  'GET /pengelola/riwayat-notifikasi',
+  logs.status === 200 && hasKeys(logs.json, ['failed', 'sent']),
+  JSON.stringify(logs.json).slice(0, 160),
+);
+
+const logId = logs.json?.failed?.[0]?.id ?? logs.json?.sent?.[0]?.id;
+if (logId) {
+  const logDetail = await request('GET', `/pengelola/riwayat-notifikasi/${logId}`, {
+    token: pengelola?.token,
+  });
+  check(
+    'GET /pengelola/riwayat-notifikasi/:id',
+    logDetail.status === 200 &&
+      hasKeys(logDetail.json, [
+        'id',
+        'kind',
+        'channel',
+        'recipients',
+        'sentAt',
+        'status',
+        'message',
+        'attempts',
+        'lastAttemptAt',
+      ]),
+  );
+}
+
 /* ---------- Error contract ---------- */
 
 const validation = await request('POST', '/wali/pengajuan-jadwal', {

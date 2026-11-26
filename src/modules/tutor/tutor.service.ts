@@ -463,10 +463,10 @@ export class TutorService {
       },
     });
     await this.notifications.notifyRole('pengelola', {
-      kind: 'jadwal',
+      kind: 'perubahan-jadwal',
       title: 'Pengajuan perubahan jadwal dari tutor',
       body: `${request.student.name} · ${dayName(request.toWeekday)} ${request.toStartTime}`,
-      to: `/pengelola/les/pengajuan/${request.id}`,
+      to: `/pengelola/les/jadwal/pengajuan/${request.id}`,
     });
     return serializeChangeRequest(request);
   }

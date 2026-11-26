@@ -103,6 +103,58 @@ export class StorageService {
     };
   }
 
+  /** Simpan buffer hasil generate (mis. laporan PDF/XLSX) tanpa upload Multer. */
+  async saveBuffer(
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+    uploadedById?: string,
+  ): Promise<UploadedFileResponse> {
+    const ext = extname(originalName) || mimeExt(mimeType);
+    const key = `${randomUUID()}${ext}`;
+    let url: string;
+
+    if (env.storageDriver === 's3' && this.s3) {
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: env.s3.bucket,
+          Key: key,
+          Body: buffer,
+          ContentType: mimeType,
+        }),
+      );
+      url = env.s3.publicBaseUrl
+        ? `${env.s3.publicBaseUrl.replace(/\/$/, '')}/${key}`
+        : `${env.s3.endpoint ?? ''}/${env.s3.bucket}/${key}`;
+    } else {
+      const dir = join(process.cwd(), env.storageLocalDir);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, key), buffer);
+      url = `/uploads/${key}`;
+    }
+
+    const saved = await this.prisma.file.create({
+      data: {
+        filename: key,
+        originalName,
+        mimeType,
+        size: buffer.length,
+        driver: env.storageDriver,
+        key,
+        url,
+        uploadedById: uploadedById ?? null,
+      },
+    });
+
+    return {
+      id: saved.id,
+      name: saved.originalName,
+      size: saved.size,
+      url: saved.url,
+      mimeType: saved.mimeType,
+    };
+  }
+
   async removeByKey(key: string) {
     try {
       if (env.storageDriver === 's3' && this.s3) {
@@ -121,5 +173,11 @@ export class StorageService {
 function mimeExt(mime: string) {
   if (mime === 'image/png') return '.png';
   if (mime === 'application/pdf') return '.pdf';
+  if (
+    mime ===
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ) {
+    return '.xlsx';
+  }
   return '.jpg';
 }

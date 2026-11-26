@@ -109,6 +109,35 @@ path tambahan agar sesuai persis dengan komentar frontend.
 | pengelola | `GET /pengelola/honor/${bulan}/${tutorId}` | ✅ | |
 | pengelola | `POST /pengelola/honor/${bulan}/${id}/bayar` | ✅ | multipart, field `proof` |
 | pengelola | `GET /pengelola/notifikasi` | ✅ | tambahan backend |
+| pengelola | `GET /pengelola/tutor` | ✅ | query `query`, `subject`, `district`, `status` |
+| pengelola | `POST /pengelola/tutor` | ✅ | body `TutorInput` |
+| pengelola | `GET /pengelola/tutor/:id` | ✅ | |
+| pengelola | `PUT /pengelola/tutor/:id` | ✅ | |
+| pengelola | `PATCH /pengelola/tutor/:id/status` | ✅ | `409` bila jadwal aktif |
+| pengelola | `GET /pengelola/siswa` | ✅ | query `query`, `subject`, `district`, `status` |
+| pengelola | `GET /pengelola/siswa/:id` | ✅ | |
+| pengelola | `PATCH /pengelola/siswa/:id/status` | ✅ | `409` bila jadwal aktif |
+| pengelola | `GET /pengelola/akun` | ✅ | query `peran`, `q` |
+| pengelola | `GET /pengelola/akun/siswa` | ✅ | siswa aktif untuk tautan |
+| pengelola | `POST /pengelola/akun` | ✅ | body `AccountInput` |
+| pengelola | `GET /pengelola/akun/:id` | ✅ | |
+| pengelola | `PUT /pengelola/akun/:id` | ✅ | |
+| pengelola | `POST /pengelola/akun/:id/reset-password` | ✅ | `{ email }`, password tidak dikembalikan |
+| pengelola | `PATCH /pengelola/akun/:id/status` | ✅ | |
+| pengelola | `PUT /pengelola/akun/:id/siswa` | ✅ | body `{ siswaIds }` |
+| pengelola | `GET /pengelola/riwayat-les` | ✅ | query `bulan`, `tutorId`, `siswaId` |
+| pengelola | `GET /pengelola/laporan-keuangan` | ✅ | query `bulan` |
+| pengelola | `GET /pengelola/tagihan` | ✅ | query `bulan` |
+| pengelola | `GET /pengelola/tagihan/:id` | ✅ | |
+| pengelola | `POST /pengelola/tagihan/:id/pembayaran` | ✅ | body `ManualPaymentInput` |
+| pengelola | `POST /pengelola/laporan-keuangan/unduh` | ✅ | PDF/XLSX nyata |
+| pengelola | `GET /pengelola/pengaturan-notifikasi` | ✅ | |
+| pengelola | `GET /pengelola/pengaturan-notifikasi/:id` | ✅ | |
+| pengelola | `PUT /pengelola/pengaturan-notifikasi/:id` | ✅ | `422` bila variabel tak dikenal |
+| pengelola | `GET /pengelola/riwayat-notifikasi` | ✅ | query `status`, `jenis`, `periode` |
+| pengelola | `GET /pengelola/riwayat-notifikasi/:id` | ✅ | |
+| pengelola | `POST /pengelola/riwayat-notifikasi/:id/kirim-ulang` | ✅ | |
+| pengelola | `POST /pengelola/riwayat-notifikasi/kirim-ulang` | ✅ | kirim ulang semua gagal |
 
 Alias notifikasi: `POST .../notifikasi/:id/read` dan
 `POST .../notifikasi/read-all` juga tersedia untuk ketiga peran.
@@ -198,6 +227,43 @@ Alias notifikasi: `POST .../notifikasi/:id/read` dan
 `ChangeRequestStatus`: `ditinjau_pengelola` | `konfirmasi_tutor` | `disetujui` | `ditolak`.
 `RegistrationStatus`: `menunggu_verifikasi` | `terverifikasi` | `ditolak`.
 
+### Pengelola · Data Master, Akun, Rekap, Laporan & Notifikasi
+
+| Tipe frontend | Endpoint | Bentuk backend |
+| --- | --- | --- |
+| `TutorRow` | `GET /pengelola/tutor` | `{ id, name, subjects, levels, district, rate, status }` |
+| `Tutor` | `GET /pengelola/tutor/:id` | `TutorRow` + `phone, email, education, days, from, until, address, pickup, joinedAt, activeStudents, activeSchedules` |
+| `TutorInput` | `POST/PUT /pengelola/tutor` | `{ name, phone?, email?, education?, subjects, levels, days, from, until, address?, rate }` |
+| `StudentRow` | `GET /pengelola/siswa` | `{ id, name, grade, subjects, status, endedAt?, tutorNames }` |
+| `Student` | `GET /pengelola/siswa/:id` | `{ id, name, grade, school, address, district, subjects, needs, guardian, lessons, status, endedAt? }` |
+| `AccountList` | `GET /pengelola/akun` | `{ counts: { wali, tutor, pengelola }, items: AccountRow[] }` |
+| `AccountRow` | di dalam `items` | `{ id, role, name, email, status, students }` |
+| `AccountDetail` | `GET /pengelola/akun/:id` | `Account` + `students: LinkedStudent[]` |
+| `Account` | detail | `{ id, role, name, email, username, phone, createdAt, lastLoginAt, status, studentIds }` |
+| `LinkedStudent` | `GET /pengelola/akun/siswa`, detail akun | `{ id, name, grade, status }` |
+| `AccountInput` | `POST/PUT /pengelola/akun` | `{ role, name, email, username, phone, studentIds }` |
+| `LessonRecap` | `GET /pengelola/riwayat-les` | `{ months, month, tutorOptions, studentOptions, held, missed, pairs, byTutor, byStudent, sessions }` |
+| `RecapSession` | di dalam `sessions` | `{ id, date, subject, topic, tutorId, tutorName, studentId, studentName, status }` |
+| `TutorSummary` | di dalam `byTutor` | `{ id, name, sessions, missed, students }` |
+| `StudentSummary` | di dalam `byStudent` | `{ id, name, sessions, missed, tutors }` |
+| `FinanceSummary` | `GET /pengelola/laporan-keuangan` | `{ state, months, month, bills, payments, honor, honorPaid, institutionShare }` |
+| `StudentBillList` | `GET /pengelola/tagihan` | `{ months, month, total, paid, remaining, unpaid, partial, paidOff }` |
+| `StudentBillRow` | di dalam daftar | `{ id, studentName, sessions, dueDate, total, remaining, status }` |
+| `StudentBill` | `GET /pengelola/tagihan/:id` | `{ id, number, studentName, guardianName, period, dueDate, items, payments }` |
+| `BillPayment` | di dalam `payments` | `{ id, amount, method, status, createdAt, manual? }` |
+| `ManualPaymentInput` | `POST /pengelola/tagihan/:id/pembayaran` | `{ amount, paidAt, method, proof? }` |
+| `ReportInput` / `ReportFile` | `POST /pengelola/laporan-keuangan/unduh` | `{ month, type, format }` → `{ name, size, url }` |
+| `NotificationSetting` | `GET/PUT /pengelola/pengaturan-notifikasi` | `{ id, group, title, screenTitle, recipient, trigger, activeNote, enabled, channel, timing, template, variables, sample, previewNote }` |
+| `SettingInput` | `PUT /pengelola/pengaturan-notifikasi/:id` | `{ enabled?, channel?, timing?, template? }` |
+| `LogList` | `GET /pengelola/riwayat-notifikasi` | `{ failed, sent }` |
+| `NotificationLog` | list/detail | `{ id, kind, channel, recipients, sentAt, status, message, attempts, lastAttemptAt, reason?, reasonShort?, permanent?, resentAt? }` |
+| `Recipient` | di dalam `recipients` | `{ name, role, contact, accountId? }` |
+| Kirim ulang semua | `POST /pengelola/riwayat-notifikasi/kirim-ulang` | `{ sent: string[], stillFailed: number }` |
+
+Status sesi rekap: `belum_dikumpulkan` | `belum_divalidasi` |
+`sudah_divalidasi` | `keberatan` | `tidak_terlaksana`.
+Status akun: `aktif` | `nonaktif`. Status log: `terkirim` | `gagal`.
+
 ## Perbedaan & Keputusan
 
 1. **Path alias.** Dua path frontend berbeda dari penamaan internal backend;
@@ -212,9 +278,10 @@ Alias notifikasi: `POST .../notifikasi/:id/read` dan
    `Virtual Account BCA` untuk pembayaran sebagian, sama seperti mock frontend.
    Tipe `GoPay` tetap didukung pada level data.
 4. **Notifikasi.** Backend menyimpan `kind` sebagai string sehingga dapat
-   memuat seluruh nilai yang dipakai tiap layar (`validasi`, `tagihan`,
-   `jadwal`, `pembayaran`, `les`, serta `presensi`, `keberatan`, `pengingat`,
-   `rekap`, `honor` untuk tutor).
+   memuat seluruh nilai yang dipakai tiap layar: wali (`validasi`, `tagihan`,
+   `pembayaran`, `les`, `jadwal`), tutor (`presensi`, `keberatan`, `pengingat`,
+   `rekap`, `honor`), dan pengelola (`pendaftaran`, `perubahan-jadwal`,
+   `notifikasi-gagal`, `keberatan`, `penawaran`, `pembayaran`).
 5. **Registrasi.** Frontend memakai `PendaftaranResult` ringkas setelah submit;
    backend mengembalikan `{ id, registrationNumber, submittedAt, studentName }`.
 6. **`?hasil=gagal`.** Frontend menambahkan parameter ini saat development untuk
@@ -223,10 +290,29 @@ Alias notifikasi: `POST .../notifikasi/:id/read` dan
 7. **Data mock vs nyata.** Beberapa layar frontend masih memakai data contoh
    (mis. `PengelolaMenu.failedNotifications`). Backend menghitung nilai nyata
    dari database dan mengembalikan tipe yang sama.
+8. **Data master tanpa hapus.** Tutor/siswa hanya bisa dinonaktifkan. Penonaktifan
+   mengembalikan `409 active_schedule` (dengan `details.schedules`) selama masih
+   ada jadwal les aktif. Endpoint `GET` mendukung filter `query`, `subject`,
+   `district`, dan `status`.
+9. **Akun & password.** Membuat akun/tutor dan reset password memakai password
+   sementara (default `pintara123`). Password tidak pernah dikembalikan; reset
+   hanya mengembalikan `{ email }`. Email/username duplikat → `409 duplicate_field`.
+10. **Laporan.** `POST /pengelola/laporan-keuangan/unduh` menghasilkan PDF
+    (`pdfkit`) atau XLSX (`exceljs`) sungguhan, disimpan lewat `StorageService`,
+    lalu mengembalikan `{ name, size, url }`.
+11. **Pengaturan notifikasi.** Template divalidasi terhadap daftar `variables`
+    milik pengaturan; variabel tak dikenal → `422 VALIDATION_ERROR` dengan
+    `details.variables`.
+12. **Riwayat notifikasi.** Setiap kejadian penting menulis `NotificationLog`
+    (pendaftaran, verifikasi, penawaran, keberatan, finalisasi presensi, rekap
+    honor). Log gagal dapat dikirim ulang; log `permanent` tetap gagal sampai
+    kontak penerima diperbarui.
 
 ## Ringkasan Parity
 
-- Seluruh path pada komentar `TODO(backend)` frontend tersedia (lihat tabel).
+- Seluruh path pada komentar `TODO(backend)` frontend tersedia (lihat tabel),
+  termasuk enam area pengelola baru: Data Master, Manajemen Akun, Rekap & Riwayat
+  Les, Laporan Keuangan, Pengaturan Notifikasi, dan Riwayat Notifikasi.
 - Nama field respons mengikuti serializer yang memetakan model database ke tipe
   frontend (`src/modules/shared/serializers.ts`).
 - Status memakai string huruf kecil Bahasa Indonesia agar cocok dengan

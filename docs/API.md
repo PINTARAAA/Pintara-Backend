@@ -184,7 +184,15 @@ untuk memilih anak saat wali memiliki lebih dari satu siswa.
       "to": "/wali/absensi"
     }
   ],
-  "weekSchedule": { "from": "…", "to": "…", "sessions": [] },
+  "weekSchedule": [
+    {
+      "id": "cmwx3rvri000d...",
+      "subject": "Matematika",
+      "start": "2026-11-26T09:00:00.000Z",
+      "end": "2026-11-26T10:30:00.000Z",
+      "tutorName": "Kak Budi Santoso"
+    }
+  ],
   "history": [
     {
       "id": "cmwx3rvri000d...",
@@ -688,8 +696,9 @@ Semua endpoint memerlukan role `tutor`.
   "email": "budi.santoso@gmail.com",
   "teaching": {
     "subjects": ["Matematika", "IPA"],
-    "students": 3,
-    "activePairs": 3
+    "levels": "SMP–SMA",
+    "availability": "Senin–Sabtu, 15.00–21.00",
+    "rate": 60000
   },
   "lbbContact": { "name": "Kak Ila", "whatsapp": "6281234567890", "display": "0812-3456-7890" },
   "appVersion": "1.0.0"
@@ -849,7 +858,12 @@ Dengan `STORAGE_DRIVER=s3`, `url` berupa URL publik/presigned.
 ```json
 {
   "week": 0,
-  "weeks": [0, 1, 2, 3],
+  "weeks": [
+    { "from": "2026-11-26T17:00:00.000Z", "to": "2026-12-02T17:00:00.000Z" },
+    { "from": "2026-12-03T17:00:00.000Z", "to": "2026-12-09T17:00:00.000Z" },
+    { "from": "2026-12-10T17:00:00.000Z", "to": "2026-12-16T17:00:00.000Z" },
+    { "from": "2026-12-17T17:00:00.000Z", "to": "2026-12-23T17:00:00.000Z" }
+  ],
   "days": [
     {
       "date": "2026-11-26T17:00:00.000Z",
@@ -860,9 +874,9 @@ Dengan `STORAGE_DRIVER=s3`, `url` berupa URL publik/presigned.
           "subject": "IPA",
           "start": "2026-11-27T09:00:00.000Z",
           "end": "2026-11-27T10:30:00.000Z",
-          "studentName": "Aisyah Putri",
-          "address": "…",
-          "status": "belum_diisi"
+          "student": { "name": "Aisyah Putri", "grade": "Kelas 8 SMP" },
+          "address": "Jl. Trunojoyo No. 12, Bangkalan",
+          "shortAddress": "Jl. Trunojoyo No. 12"
         }
       ]
     }
@@ -1463,6 +1477,437 @@ honor dari sesi yang sudah difinalisasi. Tanpa `bulan`, memakai bulan berjalan.
 | POST | `/pengelola/notifikasi/:id/read` (alias) |
 | POST | `/pengelola/notifikasi/read-all` (alias) |
 
+### 5.10 Data Master · Tutor & Siswa
+
+| Method | Path | Catatan |
+| --- | --- | --- |
+| GET | `/pengelola/tutor` | query `query`, `subject`, `district`, `status` |
+| POST | `/pengelola/tutor` | buat tutor + akun login |
+| GET | `/pengelola/tutor/:id` | detail tutor |
+| PUT | `/pengelola/tutor/:id` | ubah tutor |
+| PATCH | `/pengelola/tutor/:id/status` | body `{ "status": "aktif" | "nonaktif" }` |
+| GET | `/pengelola/siswa` | query `query`, `subject`, `district`, `status` |
+| GET | `/pengelola/siswa/:id` | detail siswa |
+| PATCH | `/pengelola/siswa/:id/status` | body `{ "status": "aktif" | "nonaktif" }` |
+
+`GET /pengelola/tutor` → array `TutorRow`:
+
+```json
+[
+  {
+    "id": "tt-budi",
+    "name": "Kak Budi Santoso",
+    "subjects": ["Matematika", "IPA"],
+    "levels": ["SMP", "SMA"],
+    "district": "Bangkalan",
+    "rate": 60000,
+    "status": "aktif"
+  }
+]
+```
+
+`GET /pengelola/tutor/:id` → `Tutor` (menambah `phone`, `email`, `education`,
+`days`, `from`, `until`, `address`, `pickup`, `joinedAt`, `activeStudents`,
+`activeSchedules`).
+
+`POST`/`PUT` body `TutorInput`:
+
+```json
+{
+  "name": "Budi Santoso",
+  "phone": "0812-1111-2222",
+  "email": "budi.santoso@gmail.com",
+  "education": "S1 Pendidikan Matematika",
+  "subjects": ["Matematika", "IPA"],
+  "levels": ["SMP"],
+  "days": ["Senin", "Rabu"],
+  "from": "15.00",
+  "until": "21.00",
+  "address": "Jl. Trunojoyo No. 10, Bangkalan",
+  "rate": 60000
+}
+```
+
+`GET /pengelola/siswa` → array `StudentRow`:
+
+```json
+[
+  {
+    "id": "s-aisyah",
+    "name": "Aisyah Putri",
+    "grade": "8 SMP",
+    "subjects": ["Matematika", "IPA"],
+    "status": "aktif",
+    "tutorNames": ["Kak Budi Santoso"]
+  }
+]
+```
+
+`GET /pengelola/siswa/:id` → `Student`:
+
+```json
+{
+  "id": "s-aisyah",
+  "name": "Aisyah Putri",
+  "grade": "8 SMP",
+  "school": "SMP Negeri 1 Bangkalan",
+  "address": "Jl. Trunojoyo No. 12, Bangkalan",
+  "district": "Bangkalan",
+  "subjects": ["Matematika", "IPA"],
+  "needs": "Persiapan ulangan",
+  "guardian": {
+    "name": "Sari Wulandari",
+    "phone": "0812-3456-7890",
+    "accountActive": true,
+    "linkedStudents": 2
+  },
+  "lessons": [
+    {
+      "subject": "Matematika",
+      "day": "Rabu",
+      "from": "16.00",
+      "until": "17.30",
+      "tutorName": "Kak Budi Santoso"
+    }
+  ],
+  "status": "aktif"
+}
+```
+
+Aturan: tutor/siswa **tidak pernah dihapus**, hanya dinonaktifkan. Penonaktifan
+ditolak `409 active_schedule` bila masih ada jadwal les aktif:
+
+```json
+{
+  "error": {
+    "code": "active_schedule",
+    "message": "Masih ada 5 jadwal les aktif.",
+    "details": { "schedules": 5 }
+  }
+}
+```
+
+`POST /pengelola/tutor` membuat akun login tutor dengan password sementara
+(default `pintara123`) yang **tidak pernah dikembalikan** API.
+
+### 5.11 Manajemen Akun
+
+| Method | Path | Catatan |
+| --- | --- | --- |
+| GET | `/pengelola/akun` | query `peran` (`wali`/`tutor`/`pengelola`), `q` |
+| GET | `/pengelola/akun/siswa` | siswa aktif untuk pilihan tautan |
+| POST | `/pengelola/akun` | buat akun |
+| GET | `/pengelola/akun/:id` | detail akun |
+| PUT | `/pengelola/akun/:id` | ubah akun |
+| POST | `/pengelola/akun/:id/reset-password` | kirim password sementara |
+| PATCH | `/pengelola/akun/:id/status` | body `{ "status": "aktif" | "nonaktif" }` |
+| PUT | `/pengelola/akun/:id/siswa` | body `{ "siswaIds": ["s-aisyah"] }` |
+
+`GET /pengelola/akun?peran=wali`:
+
+```json
+{
+  "counts": { "wali": 9, "tutor": 6, "pengelola": 1 },
+  "items": [
+    {
+      "id": "u-sari",
+      "role": "wali",
+      "name": "Sari Wulandari",
+      "email": "sari.wulandari@gmail.com",
+      "status": "aktif",
+      "students": 2
+    }
+  ]
+}
+```
+
+`GET /pengelola/akun/:id` → `AccountDetail`:
+
+```json
+{
+  "id": "u-sari",
+  "role": "wali",
+  "name": "Sari Wulandari",
+  "email": "sari.wulandari@gmail.com",
+  "username": "sari.wulandari",
+  "phone": "0812-3456-7890",
+  "createdAt": "2026-01-02T00:00:00.000Z",
+  "lastLoginAt": "2026-11-26T08:00:00.000Z",
+  "status": "aktif",
+  "studentIds": ["s-aisyah", "s-fikri"],
+  "students": [
+    { "id": "s-aisyah", "name": "Aisyah Putri", "grade": "8 SMP", "status": "aktif" }
+  ]
+}
+```
+
+`POST`/`PUT` body `AccountInput`:
+
+```json
+{
+  "role": "wali",
+  "name": "Sari Wulandari",
+  "email": "sari.wulandari@gmail.com",
+  "username": "sari.wulandari",
+  "phone": "0812-3456-7890",
+  "studentIds": ["s-aisyah"]
+}
+```
+
+`GET /pengelola/akun/siswa` → `LinkedStudent[]`:
+
+```json
+[{ "id": "s-aisyah", "name": "Aisyah Putri", "grade": "8 SMP", "status": "aktif" }]
+```
+
+`POST /pengelola/akun/:id/reset-password` → `{ "email": "sari.wulandari@gmail.com" }`.
+Password sementara hanya dikirim ke email dan **tidak pernah** dikembalikan.
+Email/username duplikat → `409 duplicate_field` dengan `details.field`.
+
+### 5.12 Rekap & Riwayat Les
+
+| Method | Path | Catatan |
+| --- | --- | --- |
+| GET | `/pengelola/riwayat-les` | query `bulan`, `tutorId`, `siswaId` |
+
+`GET /pengelola/riwayat-les?bulan=2026-11` → `LessonRecap`:
+
+```json
+{
+  "months": ["2026-10-31T17:00:00.000Z", "2026-09-30T17:00:00.000Z"],
+  "month": "2026-10-31T17:00:00.000Z",
+  "tutorOptions": [{ "id": "tt-budi", "name": "Kak Budi Santoso" }],
+  "studentOptions": [{ "id": "s-aisyah", "name": "Aisyah Putri" }],
+  "held": 14,
+  "missed": 1,
+  "pairs": 5,
+  "byTutor": [
+    { "id": "tt-budi", "name": "Kak Budi Santoso", "sessions": 8, "missed": 0, "students": 3 }
+  ],
+  "byStudent": [
+    { "id": "s-aisyah", "name": "Aisyah Putri", "sessions": 4, "missed": 0, "tutors": ["Kak Budi Santoso"] }
+  ],
+  "sessions": [
+    {
+      "id": "cmwx...",
+      "date": "2026-11-25T09:00:00.000Z",
+      "subject": "Matematika",
+      "topic": "Persamaan linear satu variabel",
+      "tutorId": "tt-budi",
+      "tutorName": "Kak Budi Santoso",
+      "studentId": "s-aisyah",
+      "studentName": "Aisyah Putri",
+      "status": "sudah_divalidasi"
+    }
+  ]
+}
+```
+
+`status` sesi: `belum_dikumpulkan`, `belum_divalidasi`, `sudah_divalidasi`,
+`keberatan`, atau `tidak_terlaksana`.
+
+### 5.13 Laporan Keuangan
+
+| Method | Path | Catatan |
+| --- | --- | --- |
+| GET | `/pengelola/laporan-keuangan` | query `bulan` |
+| GET | `/pengelola/tagihan` | query `bulan` |
+| GET | `/pengelola/tagihan/:id` | rincian tagihan |
+| POST | `/pengelola/tagihan/:id/pembayaran` | catat pembayaran manual |
+| POST | `/pengelola/laporan-keuangan/unduh` | buat PDF/XLSX |
+
+`GET /pengelola/laporan-keuangan` → `FinanceSummary`:
+
+```json
+{
+  "state": "ada",
+  "months": ["2026-11-30T17:00:00.000Z", "2026-10-31T17:00:00.000Z", "2026-09-30T17:00:00.000Z"],
+  "month": "2026-10-31T17:00:00.000Z",
+  "bills": { "total": 900000, "count": 2, "lunas": 0, "sebagian": 1, "belum": 1 },
+  "payments": { "received": 450000, "transactions": 1, "failed": 0 },
+  "honor": { "total": 2400000, "sessions": 40, "tutors": 4, "calculated": false },
+  "honorPaid": { "amount": 0, "tutors": 0 },
+  "institutionShare": -1500000
+}
+```
+
+Bila belum ada tagihan pada periode: `{ "state": "kosong", "months": [...], "month": "..." }`.
+Honor memakai rekap P7 bila sudah dihitung; bila belum, `calculated: false` dan
+nilai diestimasi dari presensi final bulan itu.
+
+`GET /pengelola/tagihan` → `StudentBillList`:
+
+```json
+{
+  "months": ["...", "...", "..."],
+  "month": "2026-10-31T17:00:00.000Z",
+  "total": 900000,
+  "paid": 450000,
+  "remaining": 450000,
+  "unpaid": [
+    { "id": "bill-fikri-current", "studentName": "Fikri Ramadhan", "sessions": 4, "dueDate": "2026-11-15T17:00:00.000Z", "total": 300000, "remaining": 300000, "status": "belum_bayar" }
+  ],
+  "partial": [
+    { "id": "bill-aisyah-current", "studentName": "Aisyah Putri", "sessions": 8, "dueDate": "2026-11-15T17:00:00.000Z", "total": 600000, "remaining": 150000, "status": "sebagian" }
+  ],
+  "paidOff": []
+}
+```
+
+`GET /pengelola/tagihan/:id` → `StudentBill`:
+
+```json
+{
+  "id": "bill-aisyah-current",
+  "number": "INV-2026-0112",
+  "studentName": "Aisyah Putri",
+  "guardianName": "Sari Wulandari",
+  "period": "2026-10-31T17:00:00.000Z",
+  "dueDate": "2026-11-15T17:00:00.000Z",
+  "items": [{ "subject": "Matematika", "sessions": 4, "unitPrice": 75000 }],
+  "payments": [
+    {
+      "id": "TRX-SEED-0001",
+      "amount": 450000,
+      "method": "QRIS",
+      "status": "berhasil",
+      "createdAt": "2026-11-21T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+`POST /pengelola/tagihan/:id/pembayaran` body `ManualPaymentInput`:
+
+```json
+{
+  "amount": 150000,
+  "paidAt": "2026-11-26T00:00:00.000Z",
+  "method": "Tunai di LBB",
+  "proof": { "name": "bukti.jpg", "size": 120000 }
+}
+```
+
+Nominal harus `> 0` dan `<= sisa tagihan`, jika tidak → `422 VALIDATION_ERROR`
+dengan `details.remaining`. Respons berupa `StudentBill` terbaru. Wali pemilik
+tagihan menerima notifikasi `pembayaran`.
+
+`POST /pengelola/laporan-keuangan/unduh` body `ReportInput`:
+
+```json
+{ "month": "2026-11-01", "type": "lengkap", "format": "pdf" }
+```
+
+`type`: `ringkasan` | `tagihan` | `honor` | `lengkap`; `format`: `pdf` | `xlsx`.
+Respons `ReportFile`:
+
+```json
+{
+  "name": "Laporan_Keuangan_Nov2026.pdf",
+  "size": 2082,
+  "url": "/uploads/92433ff1-...pdf"
+}
+```
+
+Berkas benar-benar dibuat (PDF via `pdfkit`, XLSX via `exceljs`) dan disimpan
+lewat `StorageService` (lokal atau S3).
+
+### 5.14 Pengaturan Notifikasi
+
+| Method | Path |
+| --- | --- |
+| GET | `/pengelola/pengaturan-notifikasi` |
+| GET | `/pengelola/pengaturan-notifikasi/:id` |
+| PUT | `/pengelola/pengaturan-notifikasi/:id` |
+
+`GET` → array `NotificationSetting`:
+
+```json
+[
+  {
+    "id": "pengingat-jadwal",
+    "group": "pengingat",
+    "title": "Pengingat jadwal les",
+    "screenTitle": "Pengingat jadwal",
+    "recipient": "Wali murid",
+    "trigger": "H-1 jadwal les",
+    "activeNote": "Dikirim otomatis",
+    "enabled": true,
+    "channel": "whatsapp",
+    "timing": { "kind": "sebelum_sesi", "hoursBefore": 24 },
+    "template": "Halo {nama_wali}, ...",
+    "variables": ["nama_wali", "nama_siswa"],
+    "sample": { "nama_wali": "Sari", "nama_siswa": "Aisyah" },
+    "previewNote": "Pratinjau"
+  }
+]
+```
+
+`PUT /pengelola/pengaturan-notifikasi/:id` body `SettingInput`:
+
+```json
+{
+  "enabled": true,
+  "channel": "email",
+  "timing": { "kind": "sebelum_sesi", "hoursBefore": 3 },
+  "template": "Halo {nama_wali}, sesi {nama_siswa} ..."
+}
+```
+
+Template memakai `{variabel}`. Variabel yang tidak ada di `variables` ditolak
+`422 VALIDATION_ERROR` dengan `details.variables`.
+
+`channel`: `whatsapp` | `email` | `aplikasi`.
+`timing`: `{ "kind": "sebelum_sesi", "hoursBefore": 24 }` |
+`{ "kind": "setelah_sesi", "daysAfter": 1, "time": "08.00", "maxRepeat": 3 }` |
+`{ "kind": "kejadian" }`.
+
+### 5.15 Riwayat Notifikasi
+
+| Method | Path | Catatan |
+| --- | --- | --- |
+| GET | `/pengelola/riwayat-notifikasi` | query `status`, `jenis`, `periode` |
+| GET | `/pengelola/riwayat-notifikasi/:id` | detail log |
+| POST | `/pengelola/riwayat-notifikasi/:id/kirim-ulang` | kirim ulang satu |
+| POST | `/pengelola/riwayat-notifikasi/kirim-ulang` | kirim ulang semua gagal |
+
+`GET` → `LogList`:
+
+```json
+{
+  "failed": [
+    {
+      "id": "log-1",
+      "kind": "pengingat-jadwal",
+      "channel": "whatsapp",
+      "recipients": [
+        { "name": "Sari Wulandari", "role": "wali", "contact": "6281234567890", "accountId": "u-sari" }
+      ],
+      "sentAt": "2026-11-26T01:00:00.000Z",
+      "status": "gagal",
+      "message": "Halo Sari, ...",
+      "attempts": 2,
+      "lastAttemptAt": "2026-11-26T01:05:00.000Z",
+      "reason": "Nomor WhatsApp tidak valid",
+      "reasonShort": "Kontak tidak valid",
+      "permanent": true
+    }
+  ],
+  "sent": []
+}
+```
+
+`status`: `terkirim` | `gagal`. `periode`: `hari-ini` | `7-hari` | `bulan-ini` | `bulan-lalu`.
+`kind`: `pengingat-jadwal`, `pengingat-presensi`, `pendaftaran-baru`,
+`hasil-verifikasi`, `penawaran-tutor`, `keberatan-presensi`, `rekap-honor`.
+
+`POST /pengelola/riwayat-notifikasi/:id/kirim-ulang`:
+- Log biasa → status menjadi `terkirim`, `resentAt` diisi, `attempts` bertambah.
+- Log `permanent` (kontak tidak valid) → tetap gagal; `409 resend_failed`.
+
+`POST /pengelola/riwayat-notifikasi/kirim-ulang` body
+`{ "jenis"?: "...", "periode"?: "bulan-ini" }` → `{ "sent": ["Sari Wulandari"], "stillFailed": 1 }`.
+
 ---
 
 ## 6. Notifikasi (semua peran)
@@ -1522,6 +1967,13 @@ Alias `/:id/read` dan `/read-all` berperilaku sama.
 | Status pembayaran | `berhasil`, `kedaluwarsa`, `gagal` |
 | Status tagihan (turunan) | `belum_bayar`, `sebagian`, `lunas` |
 | Status honor | `belum_dihitung`, `dihitung` |
+| Status akun (tutor/siswa/akun) | `aktif`, `nonaktif` |
+| Status sesi rekap les | `belum_dikumpulkan`, `belum_divalidasi`, `sudah_divalidasi`, `keberatan`, `tidak_terlaksana` |
+| Kanal notifikasi | `whatsapp`, `email`, `aplikasi` |
+| Status log notifikasi | `terkirim`, `gagal` |
+| Jenis log notifikasi | `pengingat-jadwal`, `pengingat-presensi`, `pendaftaran-baru`, `hasil-verifikasi`, `penawaran-tutor`, `keberatan-presensi`, `rekap-honor` |
+| Jenis laporan | `ringkasan`, `tagihan`, `honor`, `lengkap` |
+| Format laporan | `pdf`, `xlsx` |
 
 ---
 
@@ -1539,6 +1991,19 @@ Alias `/:id/read` dan `/read-all` berperilaku sama.
 - **Pembayaran.** Disimulasikan; nominal tidak boleh melebihi sisa tagihan.
 - **Honor.** Dihitung dari sesi terfinalisasi pada bulan berjalan memakai tarif
   tutor per mapel.
+- **Data master.** Tutor dan siswa tidak pernah dihapus, hanya dinonaktifkan.
+  Penonaktifan ditolak `409 active_schedule` selama masih ada jadwal les aktif.
+  Membuat tutor juga membuat akun login dengan password sementara.
+- **Akun.** Password tidak pernah dikembalikan API. Buat akun dan reset password
+  memakai password sementara (default `pintara123`) yang dikirim ke email.
+  Email/username duplikat → `409 duplicate_field`.
+- **Laporan.** `POST /pengelola/laporan-keuangan/unduh` membuat berkas PDF/XLSX
+  sungguhan dan menyimpannya lewat storage (lokal/S3), lalu mengembalikan URL.
+- **Pengaturan notifikasi.** Template memakai variabel `{nama}`; variabel tak
+  dikenal → `422 VALIDATION_ERROR` dengan `details.variables`.
+- **Riwayat notifikasi.** Log dicatat dari kejadian nyata (pendaftaran,
+  verifikasi, penawaran, keberatan, finalisasi presensi, rekap honor). Log gagal
+  dapat dikirim ulang; log dengan kontak tidak valid tetap gagal (`permanent`).
 - **Rate limit.** Global `THROTTLE_LIMIT` per `THROTTLE_TTL` detik per IP; login
   memakai `AUTH_THROTTLE_LIMIT`.
 - **Cache.** Dashboard/daftar tertentu memakai Redis dengan TTL

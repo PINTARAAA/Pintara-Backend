@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -14,15 +15,23 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthUser, CurrentUser, Roles } from '../../common/decorators';
 import { PengelolaService } from './pengelola.service';
 import {
+  AccountInputDto,
   ChangeDecisionDto,
   DeclineOfferDto,
+  LinkStudentsDto,
+  ManualPaymentDto,
   MonthDto,
   ObjectionReviewDto,
   PayHonorDto,
   RejectRegistrationDto,
+  ReportDto,
+  ResendAllDto,
   SaveScheduleDto,
   SelectTutorDto,
   SendOfferDto,
+  SettingInputDto,
+  StatusDto,
+  TutorInputDto,
 } from './pengelola.dto';
 
 @Roles('pengelola')
@@ -214,6 +223,193 @@ export class PengelolaController {
       dto,
       file,
     );
+  }
+
+  // ---------- Data Master · Tutor & Siswa ----------
+
+  @Get('tutor')
+  tutors(
+    @Query('query') query?: string,
+    @Query('subject') subject?: string,
+    @Query('district') district?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.pengelola.tutors({ query, subject, district, status });
+  }
+
+  @Post('tutor')
+  createTutor(@Body() dto: TutorInputDto) {
+    return this.pengelola.createTutor(dto);
+  }
+
+  @Get('tutor/:id')
+  tutor(@Param('id') id: string) {
+    return this.pengelola.tutor(id);
+  }
+
+  @Put('tutor/:id')
+  updateTutor(@Param('id') id: string, @Body() dto: TutorInputDto) {
+    return this.pengelola.updateTutor(id, dto);
+  }
+
+  @Patch('tutor/:id/status')
+  setTutorStatus(@Param('id') id: string, @Body() dto: StatusDto) {
+    return this.pengelola.setTutorStatus(id, dto.status);
+  }
+
+  @Get('siswa')
+  students(
+    @Query('query') query?: string,
+    @Query('subject') subject?: string,
+    @Query('district') district?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.pengelola.students({ query, subject, district, status });
+  }
+
+  @Get('siswa/:id')
+  student(@Param('id') id: string) {
+    return this.pengelola.student(id);
+  }
+
+  @Patch('siswa/:id/status')
+  setStudentStatus(@Param('id') id: string, @Body() dto: StatusDto) {
+    return this.pengelola.setStudentStatus(id, dto.status);
+  }
+
+  // ---------- Manajemen Akun ----------
+
+  @Get('akun/siswa')
+  linkableStudents() {
+    return this.pengelola.linkableStudents();
+  }
+
+  @Get('akun')
+  accounts(@Query('peran') role?: string, @Query('q') query?: string) {
+    return this.pengelola.accounts({ role, query });
+  }
+
+  @Post('akun')
+  createAccount(@Body() dto: AccountInputDto) {
+    return this.pengelola.createAccount(dto);
+  }
+
+  @Get('akun/:id')
+  account(@Param('id') id: string) {
+    return this.pengelola.account(id);
+  }
+
+  @Put('akun/:id')
+  updateAccount(@Param('id') id: string, @Body() dto: AccountInputDto) {
+    return this.pengelola.updateAccount(id, dto);
+  }
+
+  @Post('akun/:id/reset-password')
+  @HttpCode(200)
+  resetAccountPassword(@Param('id') id: string) {
+    return this.pengelola.resetAccountPassword(id);
+  }
+
+  @Patch('akun/:id/status')
+  setAccountStatus(@Param('id') id: string, @Body() dto: StatusDto) {
+    return this.pengelola.setAccountStatus(id, dto.status);
+  }
+
+  @Put('akun/:id/siswa')
+  linkStudents(@Param('id') id: string, @Body() dto: LinkStudentsDto) {
+    return this.pengelola.linkStudents(id, dto);
+  }
+
+  // ---------- Rekap & Riwayat Les ----------
+
+  @Get('riwayat-les')
+  lessonRecap(
+    @Query('bulan') month?: string,
+    @Query('tutorId') tutorId?: string,
+    @Query('siswaId') studentId?: string,
+  ) {
+    return this.pengelola.lessonRecap({ month, tutorId, studentId });
+  }
+
+  // ---------- Laporan Keuangan ----------
+
+  @Get('laporan-keuangan')
+  financeSummary(@Query('bulan') month?: string) {
+    return this.pengelola.financeSummary(month);
+  }
+
+  @Post('laporan-keuangan/unduh')
+  @HttpCode(200)
+  generateReport(@CurrentUser() user: AuthUser, @Body() dto: ReportDto) {
+    return this.pengelola.generateReport(user.id, dto);
+  }
+
+  @Get('tagihan')
+  studentBills(@Query('bulan') month?: string) {
+    return this.pengelola.studentBills(month);
+  }
+
+  @Get('tagihan/:id')
+  studentBill(@Param('id') id: string) {
+    return this.pengelola.studentBill(id);
+  }
+
+  @Post('tagihan/:id/pembayaran')
+  @HttpCode(200)
+  manualPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ManualPaymentDto,
+  ) {
+    return this.pengelola.recordManualPayment(user.id, id, dto);
+  }
+
+  // ---------- Pengaturan Notifikasi ----------
+
+  @Get('pengaturan-notifikasi')
+  notificationSettings() {
+    return this.pengelola.notificationSettings();
+  }
+
+  @Get('pengaturan-notifikasi/:id')
+  notificationSetting(@Param('id') id: string) {
+    return this.pengelola.notificationSetting(id);
+  }
+
+  @Put('pengaturan-notifikasi/:id')
+  saveNotificationSetting(
+    @Param('id') id: string,
+    @Body() dto: SettingInputDto,
+  ) {
+    return this.pengelola.saveNotificationSetting(id, dto);
+  }
+
+  // ---------- Riwayat Notifikasi ----------
+
+  @Get('riwayat-notifikasi')
+  notificationLogs(
+    @Query('status') status?: string,
+    @Query('jenis') jenis?: string,
+    @Query('periode') periode?: string,
+  ) {
+    return this.pengelola.notificationLogs({ status, kind: jenis, period: periode });
+  }
+
+  @Post('riwayat-notifikasi/kirim-ulang')
+  @HttpCode(200)
+  resendAllNotifications(@Body() dto: ResendAllDto) {
+    return this.pengelola.resendAllNotifications(dto);
+  }
+
+  @Get('riwayat-notifikasi/:id')
+  notificationLog(@Param('id') id: string) {
+    return this.pengelola.notificationLog(id);
+  }
+
+  @Post('riwayat-notifikasi/:id/kirim-ulang')
+  @HttpCode(200)
+  resendNotification(@Param('id') id: string) {
+    return this.pengelola.resendNotification(id);
   }
 
   @Get('notifikasi')
